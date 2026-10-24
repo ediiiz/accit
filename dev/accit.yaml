@@ -3,3 +3,5 @@ profile: test
 listen:
   portal: 127.0.0.1:3000
   verify: 127.0.0.1:3001
+protection:
+  mode: selected
