@@ -1,0 +1,68 @@
+# Dynamic configuration. `harness/prepare` fills in the token and writes harness/run/dynamic/accit.yml.
+http:
+  middlewares:
+    accit-set-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: "__PROXY_TOKEN__"
+    accit-verify:
+      forwardAuth:
+        address: http://10.89.20.3:8081/verify
+        trustForwardHeader: false
+        authRequestHeaders:
+          - X-Accit-Proxy-Token
+    accit-delete-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: ""
+    accit:
+      chain:
+        middlewares:
+          - accit-set-token
+          - accit-verify
+          - accit-delete-token
+
+  routers:
+    portal:
+      rule: Host(`portal.accit.test`)
+      entryPoints: [websecure]
+      middlewares: [accit-set-token]
+      service: portal
+      tls:
+        options: mtls
+    gated:
+      rule: Host(`gated.accit.test`)
+      entryPoints: [websecure]
+      service: whoami-gated
+      tls: {}
+    open:
+      rule: Host(`open.accit.test`)
+      entryPoints: [websecure]
+      service: whoami-open
+      tls: {}
+
+  services:
+    portal:
+      loadBalancer:
+        servers:
+          - url: http://10.89.20.3:8080
+    whoami-gated:
+      loadBalancer:
+        servers:
+          - url: http://10.89.30.3:80
+    whoami-open:
+      loadBalancer:
+        servers:
+          - url: http://10.89.30.4:80
+
+tls:
+  certificates:
+    - certFile: /certs/server.pem
+      keyFile: /certs/server.key
+  options:
+    mtls:
+      minVersion: VersionTLS12
+      clientAuth:
+        caFiles:
+          - /certs/client-ca.pem
+        clientAuthType: RequireAndVerifyClientCert

@@ -41,6 +41,9 @@ tmp
 temp
 .cache
 
+# Compose test harness (generated keys live in harness/run)
+harness
+
 # Docs & samples not needed to build
 *.md
 sample

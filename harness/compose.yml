@@ -1,0 +1,106 @@
+# Test stack for crates/e2e: real Traefik in front of accit and two whoami apps. `scripts/e2e` runs it.
+# Docs: harness/README.md. Addresses are pinned because accit trusts exactly Traefik's (docs/spec.md 10).
+name: accit-e2e
+
+services:
+  traefik:
+    image: traefik:v3.7.16
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./run/traefik:/certs:ro
+      - ./run/dynamic:/dynamic:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    networks:
+      edge:
+        ipv4_address: 10.89.10.2
+      accit:
+        ipv4_address: 10.89.20.2
+      apps:
+        ipv4_address: 10.89.30.2
+
+  accit:
+    build:
+      context: ..
+      dockerfile: docker/single/Dockerfile
+    image: accit-e2e:local
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /data:uid=65532,gid=65532,mode=0700
+    volumes:
+      - ./run/accit:/config:ro
+    healthcheck:
+      test: ["CMD", "/accit", "healthcheck"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      accit:
+        ipv4_address: 10.89.20.3
+
+  whoami-gated:
+    image: traefik/whoami:v1.11.0
+    networks:
+      apps:
+        ipv4_address: 10.89.30.3
+
+  whoami-open:
+    image: traefik/whoami:v1.11.0
+    networks:
+      apps:
+        ipv4_address: 10.89.30.4
+
+  # Sends from several fixed source addresses: curl --interface <address>.
+  client:
+    build: ./client
+    image: accit-e2e-client:local
+    cap_add: [NET_ADMIN]
+    environment:
+      SOURCE_ADDRESSES: "10.89.10.11 10.89.10.12 10.89.10.13"
+    command:
+      - sh
+      - -eu
+      - -c
+      - |
+        dev=$$(ip -o route show 10.89.10.0/24 | awk '{print $$3}')
+        for address in $$SOURCE_ADDRESSES; do ip addr add "$$address/24" dev "$$dev"; done
+        exec sleep infinity
+    healthcheck:
+      test: ["CMD-SHELL", "ip -4 -o addr show | grep -q ' 10.89.10.13/'"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    extra_hosts:
+      - "portal.accit.test:10.89.10.2"
+      - "gated.accit.test:10.89.10.2"
+      - "open.accit.test:10.89.10.2"
+    volumes:
+      - ./run/client:/certs:ro
+    depends_on:
+      traefik:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 10.89.10.10
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 10.89.10.0/24
+  accit:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.20.0/24
+  apps:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.89.30.0/24
