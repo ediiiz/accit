@@ -283,8 +283,8 @@ describe("revoke", () => {
     expect(portal.screen).toBe("expired");
   });
 
-  it("a refusal is unavailable for revoking; Try again revokes again", async () => {
-    const { api } = fakeApi({
+  it("a refusal is unavailable for revoking; a retry does not revoke without a new confirmation", async () => {
+    const { api, calls } = fakeApi({
       status: [active, active, active],
       revoke: [new ApiError("unavailable"), status()],
     });
@@ -298,6 +298,11 @@ describe("revoke", () => {
     expect(portal.failedAction).toBe("revoke");
 
     await portal.retry();
+
+    expect(calls).toEqual(["status", "status", "revoke:fresh"]);
+    expect(portal.screen).toBe("unavailable");
+
+    await portal.revoke();
 
     expect(portal.screen).toBe("not_enabled");
   });

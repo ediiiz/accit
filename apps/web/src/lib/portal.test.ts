@@ -106,6 +106,19 @@ describe("primaryAction", () => {
     });
   });
 
+  it("a failed Revoke offers Try again as a new confirmation, not a retry", () => {
+    expect(primaryAction("unavailable", 0, "revoke")).toEqual({
+      command: "revoke",
+      label: "Try again",
+      disabled: false,
+    });
+    expect(primaryAction("rate_limited", 3, "revoke")).toEqual({
+      command: "revoke",
+      label: "Try again in 3 s",
+      disabled: true,
+    });
+  });
+
   it("the home network and loading offer nothing", () => {
     expect(primaryAction("home", 0)).toBeNull();
     expect(primaryAction("loading", 0)).toBeNull();

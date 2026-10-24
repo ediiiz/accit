@@ -70,12 +70,19 @@ export function httpsApps(apps: readonly PortalApp[]): PortalApp[] {
 }
 
 export interface PrimaryAction {
-  command: "unlock" | "retry";
+  /** `revoke` asks for confirmation again; a failed Revoke is never repeated unasked. */
+  command: "unlock" | "retry" | "revoke";
   label: string;
   disabled: boolean;
 }
 
-export function primaryAction(screen: Screen, secondsLeft: number): PrimaryAction | null {
+export function primaryAction(
+  screen: Screen,
+  secondsLeft: number,
+  failedAction: Action | null = null,
+): PrimaryAction | null {
+  const retry = failedAction === "revoke" ? "revoke" : "retry";
+
   switch (screen) {
     case "not_enabled":
     case "expired":
@@ -86,10 +93,10 @@ export function primaryAction(screen: Screen, secondsLeft: number): PrimaryActio
     case "enabled":
       return { command: "unlock", label: m.extend_access(), disabled: false };
     case "unavailable":
-      return { command: "retry", label: m.try_again(), disabled: false };
+      return { command: retry, label: m.try_again(), disabled: false };
     case "rate_limited":
       return {
-        command: "retry",
+        command: retry,
         label: secondsLeft > 0 ? m.try_again_in({ seconds: secondsLeft }) : m.try_again(),
         disabled: secondsLeft > 0,
       };
