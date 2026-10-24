@@ -12,7 +12,15 @@
 	import { m } from '#lib/paraglide/messages.js';
 	import { overwriteGetLocale } from '#lib/paraglide/runtime.js';
 	import type { PortalController } from '#lib/portal-controller.svelte.js';
-	import { formatUntil, localeFor, type Screen } from '#lib/portal.js';
+	import {
+		copyFor,
+		formatUntil,
+		localeFor,
+		primaryAction,
+		type Copy,
+		type Icon,
+		type PrimaryAction
+	} from '#lib/portal.js';
 
 	let {
 		portal,
@@ -28,63 +36,28 @@
 		document.documentElement.lang = locale;
 	});
 
-	interface Copy {
-		icon: Component;
-		heading: string;
-		body?: string;
-	}
-
-	const copies: Partial<Record<Screen, () => Copy>> = {
-		not_enabled: () => ({ icon: Clock, heading: m.not_enabled_heading(), body: m.not_enabled_body() }),
-		submitting: () => ({ icon: LoaderCircle, heading: m.submitting_heading() }),
-		enabled: () => ({
-			icon: CircleCheck,
-			heading: m.enabled_heading(),
-			body: portal.status?.expiry
-				? m.enabled_body({ until: formatUntil(portal.status.expiry, locale) })
-				: undefined
-		}),
-		expired: () => ({ icon: Clock, heading: m.expired_heading() }),
-		changed: () => ({ icon: TriangleAlert, heading: m.changed_heading(), body: m.changed_body() }),
-		home: () => ({ icon: House, heading: m.home_heading(), body: m.home_body() }),
-		unavailable: () => ({
-			icon: TriangleAlert,
-			heading:
-				portal.failedAction === 'revoke' ? m.unavailable_revoke_heading() : m.unavailable_heading(),
-			body: m.unavailable_body()
-		}),
-		rate_limited: () => ({ icon: Clock, heading: m.rate_limited_heading() })
+	const icons: Record<Icon, Component> = {
+		check: CircleCheck,
+		clock: Clock,
+		home: House,
+		spinner: LoaderCircle,
+		alert: TriangleAlert
 	};
 
-	const copy = $derived(copies[portal.screen]?.() ?? null);
+	const copy = $derived(
+		copyFor(portal.screen, {
+			until: portal.status?.expiry ? formatUntil(portal.status.expiry, locale) : null,
+			failedAction: portal.failedAction
+		})
+	);
 
 	const failed = $derived(portal.screen === 'unavailable' || portal.screen === 'rate_limited');
 
-	const action = $derived.by(() => {
-		switch (portal.screen) {
-			case 'not_enabled':
-			case 'expired':
-			case 'changed':
-				return { label: m.enable_access(), disabled: false, run: () => portal.unlock() };
-			case 'submitting':
-				return { label: m.enable_access(), disabled: true, run: () => portal.unlock() };
-			case 'enabled':
-				return { label: m.extend_access(), disabled: false, run: () => portal.unlock() };
-			case 'unavailable':
-				return { label: m.try_again(), disabled: false, run: () => portal.retry() };
-			case 'rate_limited':
-				return {
-					label:
-						portal.secondsLeft > 0
-							? m.try_again_in({ seconds: portal.secondsLeft })
-							: m.try_again(),
-					disabled: portal.secondsLeft > 0,
-					run: () => portal.retry()
-				};
-			default:
-				return null;
-		}
-	});
+	const action = $derived(primaryAction(portal.screen, portal.secondsLeft));
+
+	function run(command: PrimaryAction['command']) {
+		return command === 'unlock' ? portal.unlock() : portal.retry();
+	}
 
 	const showTip = $derived(['not_enabled', 'expired', 'changed', 'enabled'].includes(portal.screen));
 
@@ -109,10 +82,11 @@
 </svelte:head>
 
 {#snippet message(text: Copy)}
+	{@const Glyph = icons[text.icon]}
 	<div class="flex items-start gap-3">
-		<text.icon
+		<Glyph
 			aria-hidden="true"
-			class={['mt-1 size-6 shrink-0', text.icon === LoaderCircle && 'motion-safe:animate-spin']}
+			class={['mt-1 size-6 shrink-0', text.icon === 'spinner' && 'motion-safe:animate-spin']}
 		/>
 		<div class="flex flex-col gap-1">
 			<h1 class="text-2xl font-semibold">{text.heading}</h1>
@@ -140,7 +114,7 @@
 			class="h-11 w-full text-base"
 			disabled={action.disabled}
 			aria-busy={portal.screen === 'submitting' ? 'true' : undefined}
-			onclick={action.run}
+			onclick={() => run(action.command)}
 		>
 			{action.label}
 		</Button>

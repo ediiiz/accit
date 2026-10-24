@@ -78,7 +78,7 @@ describe("submitting and enabled", () => {
     unlocked.resolve(active);
 
     await expect.element(page.getByText("Access is enabled.")).toBeVisible();
-    await expect.element(page.getByText(/^Available until .*2026/)).toBeVisible();
+    await expect.element(page.getByText(/^Available until .*2026.*[AP]M \S+\.$/)).toBeVisible();
     await expect.element(button("Extend access")).toBeEnabled();
     await expect
       .element(page.getByRole("link", { name: "Jellyfin" }))
@@ -264,7 +264,7 @@ describe("language", () => {
     await mount({ status: [active] }, { languages: ["de"] });
 
     await expect.element(page.getByText("Zugriff ist aktiviert.")).toBeVisible();
-    await expect.element(page.getByText(/^Gültig bis .*2026/)).toBeVisible();
+    await expect.element(page.getByText(/^Gültig bis .*2026.*\d{2}:\d{2} \S+\.$/)).toBeVisible();
     await expect.element(button("Zugriff verlängern")).toBeVisible();
   });
 });

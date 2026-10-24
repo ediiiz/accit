@@ -45,14 +45,31 @@ describe("loading", () => {
     expect(portal.screen).toBe("changed");
   });
 
-  it("a failed refresh keeps the screen already shown", async () => {
-    const { api } = fakeApi({ status: [active, new ApiError("unavailable")] });
+  it("a failed refresh is unavailable, not the screen shown before", async () => {
+    const { api } = fakeApi({ status: [active, new ApiError("unavailable"), active] });
     const portal = new PortalController(api, memoryStore());
 
     await portal.load();
     await portal.load();
 
+    expect(portal.screen).toBe("unavailable");
+
+    await portal.retry();
+
     expect(portal.screen).toBe("enabled");
+  });
+
+  it("a later refresh wins over an earlier one that answers last", async () => {
+    const first = deferred<PortalStatus>();
+    const { api } = fakeApi({ status: [first.promise, status({ state: "expired" })] });
+    const portal = new PortalController(api, memoryStore());
+    const early = portal.load();
+
+    await portal.load();
+    first.resolve(active);
+    await early;
+
+    expect(portal.screen).toBe("expired");
   });
 
   it("a refresh replaces the status", async () => {
@@ -90,6 +107,24 @@ describe("unlock", () => {
     expect(calls).toEqual(["status", "status", "unlock:fresh"]);
     expect(portal.screen).toBe("enabled");
     expect(store.value).toBe(ADDRESS);
+  });
+
+  it("a status read from before the tap does not overwrite the Unlock", async () => {
+    const early = deferred<PortalStatus>();
+
+    const { api } = fakeApi({
+      status: [early.promise, status({ csrf_token: "fresh" })],
+      unlock: [active],
+    });
+
+    const portal = new PortalController(api, memoryStore());
+    const loading = portal.load();
+
+    await portal.unlock();
+    early.resolve(status());
+    await loading;
+
+    expect(portal.screen).toBe("enabled");
   });
 
   it("does nothing when the fresh status says the connection is on the home network", async () => {
@@ -217,6 +252,24 @@ describe("revoke", () => {
     expect(calls).toEqual(["status", "status", "revoke:fresh"]);
     expect(portal.screen).toBe("not_enabled");
     expect(portal.revoking).toBe(false);
+  });
+
+  it("a status read from before the tap does not overwrite the Revoke", async () => {
+    const early = deferred<PortalStatus>();
+
+    const { api } = fakeApi({
+      status: [early.promise, active],
+      revoke: [status()],
+    });
+
+    const portal = new PortalController(api, memoryStore());
+    const loading = portal.load();
+
+    await portal.revoke();
+    early.resolve(active);
+    await loading;
+
+    expect(portal.screen).toBe("not_enabled");
   });
 
   it("does nothing when the Grant is already gone", async () => {

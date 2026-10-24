@@ -3,7 +3,8 @@
 mod common;
 
 use axum::http::{Method, StatusCode};
-use common::harness::{Harness, ORIGIN, address, header, ready, replacing, without};
+use common::harness::{Harness, ORIGIN, address, ready};
+use common::{header, replacing, without};
 
 const CLIENT: &str = "93.184.216.34";
 

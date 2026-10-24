@@ -11,8 +11,7 @@ use sha2::{Digest, Sha256};
 const CSP: &str = "default-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; \
                    frame-ancestors 'none'; form-action 'self'";
 
-/// Source expressions (`'sha256-…'`) for the inline `<script>` blocks of a page. the Portal build's static
-/// output inlines its bootstrap script; a hash admits that exact text and nothing else.
+/// `'sha256-…'` source expressions for a page's inline scripts: the static build inlines its bootstrap.
 #[derive(Clone, Debug)]
 pub struct InlineScripts(Vec<String>);
 

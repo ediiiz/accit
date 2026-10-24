@@ -6,7 +6,9 @@ export interface LastUnlocked {
   write(address: string): void;
 }
 
-export type Action = "status" | "unlock" | "revoke";
+export type Mutation = "unlock" | "revoke";
+
+export type Action = "status" | Mutation;
 
 interface Failure {
   action: Action;
@@ -40,9 +42,11 @@ export const browserLastUnlocked: LastUnlocked = {
 export class PortalController {
   status = $state.raw<PortalStatus | null>(null);
   secondsLeft = $state(0);
-  #working = $state<"unlock" | "revoke" | null>(null);
+  #working = $state<Mutation | null>(null);
   #failure = $state.raw<Failure | null>(null);
   #lastUnlocked: string | null;
+  /** The newest read or mutation; an older read that answers later is dropped. */
+  #latest = 0;
   #timer: ReturnType<typeof setInterval> | undefined;
   readonly #api: Api;
   readonly #store: LastUnlocked;
@@ -78,15 +82,17 @@ export class PortalController {
       return;
     }
 
-    try {
-      this.status = await this.#api.status();
+    const ticket = ++this.#latest;
 
-      if (this.#failure?.action === "status") {
-        this.#failure = null;
+    try {
+      const status = await this.#api.status();
+
+      if (ticket === this.#latest) {
+        this.#loaded(status);
       }
     } catch (error) {
-      if (this.status === null || this.#failure?.action === "status") {
-        this.#fail("status", error instanceof ApiError ? error : new ApiError("unavailable"));
+      if (ticket === this.#latest) {
+        this.#loadFailed(error instanceof ApiError ? error : new ApiError("unavailable"));
       }
     }
   }
@@ -117,13 +123,14 @@ export class PortalController {
     clearInterval(this.#timer);
   }
 
-  async #mutate(action: "unlock" | "revoke"): Promise<void> {
+  async #mutate(action: Mutation): Promise<void> {
     if (this.#working) {
       return;
     }
 
     this.#working = action;
     this.#failure = null;
+    this.#latest++;
 
     try {
       const fresh = await this.#api.status();
@@ -141,7 +148,22 @@ export class PortalController {
     }
   }
 
-  #remember(action: "unlock" | "revoke", result: PortalStatus): void {
+  #loaded(status: PortalStatus): void {
+    this.status = status;
+
+    if (this.#failure?.action === "status") {
+      this.#failure = null;
+    }
+  }
+
+  /** A failed refresh leaves a failed mutation's screen alone. */
+  #loadFailed(error: ApiError): void {
+    if (!this.#failure || this.#failure.action === "status") {
+      this.#fail("status", error);
+    }
+  }
+
+  #remember(action: Mutation, result: PortalStatus): void {
     if (action === "unlock" && result.state === "active") {
       this.#store.write(result.address);
       this.#lastUnlocked = result.address;

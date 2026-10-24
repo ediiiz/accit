@@ -2,10 +2,11 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { m } from '#lib/paraglide/messages.js';
 	import type { PortalApp } from '#lib/api.js';
+	import { httpsApps } from '#lib/portal.js';
 
 	let { apps }: { apps: PortalApp[] } = $props();
 
-	const links = $derived(apps.filter((app) => app.url.startsWith('https://')));
+	const links = $derived(httpsApps(apps));
 </script>
 
 {#if links.length > 0}

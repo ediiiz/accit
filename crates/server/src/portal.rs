@@ -20,6 +20,7 @@ use config::{Config, Language, Profile};
 use serde::Serialize;
 use store::Grants;
 
+pub use crate::static_site::Files;
 pub use clock::Clock;
 pub(crate) use headers::InlineScripts;
 
@@ -106,12 +107,16 @@ impl Portal {
 }
 
 pub fn router(trust: ProxyTrust, portal: Portal) -> Router {
+    router_with(trust, portal, Files::embedded())
+}
+
+pub fn router_with(trust: ProxyTrust, portal: Portal, files: Files) -> Router {
     Router::new()
         .route("/api/status", get(api::status))
         .route("/api/unlock", post(api::unlock))
         .route("/api/revoke", post(api::revoke))
         .route("/api/{*rest}", any(error::not_found))
-        .fallback(static_site::serve)
+        .fallback(move |uri, headers| std::future::ready(static_site::serve(&files, &uri, &headers)))
         .with_state(portal)
         .layer(middleware::from_fn_with_state(trust, trust::portal_gate))
         .layer(middleware::from_fn(headers::secure))

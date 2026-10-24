@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PortalStatus } from "./api.js";
-import { formatUntil, localeFor, screenFor } from "./portal.js";
+import { copyFor, formatUntil, httpsApps, localeFor, primaryAction, screenFor } from "./portal.js";
 
 const status = (patch: Partial<PortalStatus>): PortalStatus => ({
   state: "none",
@@ -55,8 +55,83 @@ describe("localeFor", () => {
 });
 
 describe("formatUntil", () => {
-  it("renders Unix seconds as local date and time", () => {
+  it("renders Unix seconds as date, time and timezone", () => {
     // 2026-11-13T22:13:20Z
-    expect(formatUntil(1_794_608_000, "de", "UTC")).toBe("13.11.2026, 22:13");
+    expect(formatUntil(1_794_608_000, "de", "UTC")).toBe("13. Nov. 2026, 22:13 UTC");
+    expect(formatUntil(1_794_608_000, "en", "Europe/Berlin")).toBe("Nov 13, 2026, 11:13 PM GMT+1");
+  });
+});
+
+describe("httpsApps", () => {
+  it("keeps only https links", () => {
+    const apps = [
+      { name: "Jellyfin", url: "https://jellyfin.example.com" },
+      { name: "Plain", url: "http://plain.example.com" },
+      { name: "Script", url: "javascript:alert(1)" },
+    ];
+
+    expect(httpsApps(apps)).toEqual([apps[0]]);
+  });
+});
+
+describe("primaryAction", () => {
+  it.each([
+    ["not_enabled", "unlock", "Enable access"],
+    ["expired", "unlock", "Enable access"],
+    ["changed", "unlock", "Enable access"],
+    ["enabled", "unlock", "Extend access"],
+    ["unavailable", "retry", "Try again"],
+  ] as const)("%s offers %s as %s", (screen, command, label) => {
+    expect(primaryAction(screen, 0)).toEqual({ command, label, disabled: false });
+  });
+
+  it("is disabled while submitting", () => {
+    expect(primaryAction("submitting", 0)).toEqual({
+      command: "unlock",
+      label: "Enable access",
+      disabled: true,
+    });
+  });
+
+  it("a rate limit counts down, then offers Try again", () => {
+    expect(primaryAction("rate_limited", 12)).toEqual({
+      command: "retry",
+      label: "Try again in 12 s",
+      disabled: true,
+    });
+    expect(primaryAction("rate_limited", 0)).toEqual({
+      command: "retry",
+      label: "Try again",
+      disabled: false,
+    });
+  });
+
+  it("the home network and loading offer nothing", () => {
+    expect(primaryAction("home", 0)).toBeNull();
+    expect(primaryAction("loading", 0)).toBeNull();
+  });
+});
+
+describe("copyFor", () => {
+  const view = { until: "tomorrow", failedAction: null } as const;
+
+  it("loading has no copy", () => {
+    expect(copyFor("loading", view)).toBeNull();
+  });
+
+  it("enabled names the expiry, and says nothing without one", () => {
+    expect(copyFor("enabled", view)).toMatchObject({
+      heading: "Access is enabled.",
+      body: "Available until tomorrow.",
+    });
+    expect(copyFor("enabled", { ...view, until: null })?.body).toBeUndefined();
+  });
+
+  it("unavailable names the action that failed", () => {
+    expect(copyFor("unavailable", view)?.heading).toBe("We couldn't enable access.");
+    expect(copyFor("unavailable", { ...view, failedAction: "revoke" })).toMatchObject({
+      heading: "We couldn't disable access.",
+      body: "Please try again.",
+    });
   });
 });
