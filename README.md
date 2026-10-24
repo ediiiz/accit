@@ -6,6 +6,7 @@ Lets trusted people temporarily allow their current public IP address to reach s
 - `apps/web` — the Portal: one prerendered SvelteKit route, embedded into the binary. See `apps/web/AGENTS.md`.
 - `packages/env`, `packages/config` — web tooling env schema, shared TS config.
 - `docker/single` — the image: the binary on distroless. See `docker/single/README.md`.
+- `docs/guides` — operator guide, threat model, and the onboarding guide for Credential holders (English, German, PDF). `scripts/client-ca` makes the client CA and the shared `.p12`.
 
 ## Request flow
 
@@ -35,6 +36,8 @@ bun run dev          # Portal dev server :5173, proxies /api to :3000
 | `bun run dev` / `bun run dev:server`         | Portal dev server / accit.                  |
 | `bun run check`                              | Portal typecheck.                           |
 | `scripts/check-rust`                         | Rust gate: fmt, clippy, file length, tests. |
+| `scripts/client-ca create\|rotate [dir]`     | Client CA, shared leaf and `.p12`.          |
+| `scripts/guides-pdf`                         | Rebuild the onboarding PDFs.                |
 | `bun run lint`, `bun run format:check`       | oxlint + eslint, oxfmt.                     |
 | `bun run fallow`                             | Dead code, duplication, health.             |
 | `docker build -f docker/single/Dockerfile .` | Production image.                           |

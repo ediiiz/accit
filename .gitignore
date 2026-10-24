@@ -75,3 +75,7 @@ apps/web/.vitest/
 
 # Compose harness: generated PKI, token and configs
 harness/run/
+
+# Client CA output (scripts/client-ca): the .p12 is a credential
+/client-ca/
+*.p12

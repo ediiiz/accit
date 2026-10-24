@@ -1,6 +1,6 @@
 # Compose harness
 
-Real Traefik in front of accit, for `crates/e2e`. Run it with `scripts/e2e` (needs a working Docker): it generates the test PKI and token (`harness/prepare`), starts the stack, runs the suite and removes the stack. Not part of `scripts/ci`.
+Real Traefik in front of accit, for `crates/e2e`. Run it with `scripts/e2e` (needs a working Docker): it generates the test PKI and token (`harness/prepare`), starts the stack, runs the suite and removes the stack. Not part of `scripts/ci`. `scripts/e2e-web` runs the Portal's Playwright suite (`apps/web/tests/e2e`) against the same stack from the `browser` service (profile `browser`, Chromium at `10.89.10.13`).
 
 ```
  client (10.89.10.10-.12) ──► traefik ──► accit  (10.89.20.3, profile: test)

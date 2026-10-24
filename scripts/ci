@@ -22,6 +22,8 @@ if ! command -v cargo-deny >/dev/null 2>&1; then
   exit 1
 fi
 cargo deny check licenses bans sources
+step "client-ca script"
+scripts/test-client-ca
 step "lint"
 bun run lint
 step "format"

@@ -15,6 +15,7 @@ entryPoints:
     http:
       middlewares:
         - accit@file
+      aliasHeadersStrategy: delete
       tls: {}
   traefik:
     address: ":8080"
