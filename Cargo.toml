@@ -15,6 +15,7 @@ store = { path = "crates/store" }
 anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }
 getrandom = "0.4"
+httpdate = "1"
 idna = "1"
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }

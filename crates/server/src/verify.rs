@@ -131,6 +131,10 @@ impl Verifier {
         Arc::clone(&self.0.protection.read().unwrap_or_else(PoisonError::into_inner))
     }
 
+    pub(crate) fn grants(&self) -> &Grants {
+        &self.0.grants
+    }
+
     /// Inside a Trusted network and not excluded: the Portal shows `trusted` and offers no Unlock.
     pub(crate) fn is_trusted(&self, address: Address) -> bool {
         self.protection().trusted.contains(address)

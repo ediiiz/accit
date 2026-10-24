@@ -5,18 +5,26 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use config::Config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::{admin, serve};
+use crate::admin::{self, GrantCommand};
+use crate::serve;
 
 const USAGE: &str = "Usage: accit [command]
 
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
   admin reload  Reload the Policy in the running daemon (as SIGHUP does).
+  admin list    Active Grants: Address and expiry.
+  admin revoke <address>
+                Revoke the Grant of one Address.
+  admin revoke-all
+                Revoke every Grant.
+  admin recover --discard-grants | --keep-grants
+                Leave the failed-closed state, deleting (recommended) or keeping the stored Grants.
   admin status  Active Grants, verifications per minute and denials.
   admin check [file]
                 Validate a config without applying it (default: the running config):
@@ -74,16 +82,17 @@ async fn admin(args: &[String]) -> Result<()> {
         return check(rest);
     }
 
-    let command = match args {
-        [command] if matches!(command.as_str(), "reload" | "status") => command,
-        _ => bail!("unknown admin command {args:?}\n\n{USAGE}"),
-    };
+    let command = args.join(" ");
+    let grant_command = GrantCommand::parse(&command).map_err(|error| anyhow!("{error:#}\n\n{USAGE}"))?;
+    if !matches!(command.as_str(), "reload" | "status") && grant_command.is_none() {
+        bail!("unknown admin command {args:?}\n\n{USAGE}");
+    }
     let path = config::path_from_env();
     let yaml = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let socket = config::admin_socket(&yaml)
         .with_context(|| format!("in {}", path.display()))?
         .with_context(|| format!("no admin_socket or database in {}", path.display()))?;
-    let answer = admin::request(&socket, command).await?;
+    let answer = admin::request(&socket, &command).await?;
 
     Ok(std::io::stdout().write_all(answer.as_bytes())?)
 }

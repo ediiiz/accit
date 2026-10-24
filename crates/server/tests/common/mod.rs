@@ -18,6 +18,7 @@ use server::{portal, verify};
 use store::{Grants, Limits};
 use tower::ServiceExt;
 
+mod faults;
 pub mod harness;
 
 pub const PROXY: &str = "172.30.0.2";
