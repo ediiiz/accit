@@ -66,3 +66,6 @@ target
 # Agent factory state, slots and reviews (docs/factory.md)
 /.factory/
 __pycache__/
+
+# /loop's scheduler lock
+.claude/scheduled_tasks.lock
