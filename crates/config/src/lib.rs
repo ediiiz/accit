@@ -1,5 +1,6 @@
 //! accit configuration (`/config/accit.yaml`), read at startup and on reload. Unknown keys are errors.
 
+mod admin_socket;
 mod apps;
 mod config;
 mod duration;
@@ -10,6 +11,7 @@ mod token;
 
 use std::path::PathBuf;
 
+pub use admin_socket::admin_socket;
 pub use apps::AppLink;
 pub use config::{Config, Language, Profile};
 pub use listen::Listen;

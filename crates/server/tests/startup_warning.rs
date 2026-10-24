@@ -104,7 +104,7 @@ async fn an_empty_selection_is_reported_loudly() {
     let log = policy_log("  mode: selected\n").await;
 
     assert!(log.contains("WARN"), "{log}");
-    assert!(log.contains("gates nothing"), "{log}");
+    assert!(log.contains("no host requires a Grant"), "{log}");
 }
 
 #[tokio::test]
