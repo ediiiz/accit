@@ -11,7 +11,7 @@ Dependencies flow one way: `access ← config ← server` and `access ← store 
 | `access` | The domain, without I/O: Address, Hostname (canonical parsing), and later the gate decision.               |
 | `config` | `/config/accit.yaml`: parsing and validation. Unknown keys are errors. No env reads beyond `ACCIT_CONFIG`. |
 | `store`  | Grants: the in-memory map verification reads, SQLite (sqlx) behind it, audit events, retention cleanup.    |
-| `server` | Listeners, routers (`portal.rs`, `verify.rs`), readiness, static site, CLI (`cli.rs`).                     |
+| `server` | Listeners, routers (`portal.rs`, `verify.rs`), proxy trust (`trust.rs`), readiness, static site, CLI.      |
 
 ## Commands
 
