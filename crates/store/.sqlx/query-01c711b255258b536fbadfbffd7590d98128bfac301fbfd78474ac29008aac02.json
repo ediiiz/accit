@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO grants (address, expires_at) VALUES (?, ?)\n         ON CONFLICT (address) DO UPDATE SET expires_at = excluded.expires_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "01c711b255258b536fbadfbffd7590d98128bfac301fbfd78474ac29008aac02"
+}

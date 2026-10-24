@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM grants WHERE address = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4cc5d6879c5f2c24133b779619ec2ce54abe95f23aabc11297d1a0af55b2b6c1"
+}

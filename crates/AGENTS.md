@@ -4,21 +4,31 @@ One binary, `accit` (crate `server`): the Portal listener (embedded web build, `
 
 ## Crates
 
-Dependencies flow one way: `access ← config ← server`.
+Dependencies flow one way: `access ← config ← server` and `access ← store ← server`.
 
 | Crate    | Holds                                                                                                      |
 | -------- | ---------------------------------------------------------------------------------------------------------- |
-| `access` | The domain, without I/O: Address, Hostname (canonical parsing), and later Grants and the gate decision.    |
+| `access` | The domain, without I/O: Address, Hostname (canonical parsing), and later the gate decision.               |
 | `config` | `/config/accit.yaml`: parsing and validation. Unknown keys are errors. No env reads beyond `ACCIT_CONFIG`. |
+| `store`  | Grants: the in-memory map verification reads, SQLite (sqlx) behind it, audit events, retention cleanup.    |
 | `server` | Listeners, routers (`portal.rs`, `verify.rs`), proxy trust (`trust.rs`), readiness, static site, CLI.      |
 
 ## Commands
 
 `scripts/check-rust` uses `$CARGO`, else the host `cargo`, else `scripts/cargo` (cargo in the pinned image, `docker/rust-dev`) for hosts without a toolchain.
 
-- Gate (run before every commit touching `crates/`): `scripts/check-rust`. It runs fmt, clippy `-D warnings`, the 300-line file cap and all tests.
+- Gate (run before every commit touching `crates/`): `scripts/check-rust`. It runs fmt, clippy `-D warnings`, the 300-line file cap, the sqlx query cache check and all tests.
 - Format: `scripts/cargo fmt`.
 - Dev server: `bun run dev:server` (config `dev/accit.yaml`, `profile: test`).
+- SQL lives in `sqlx::query!` macros checked against the cache in `crates/store/.sqlx`; builds use it (`SQLX_OFFLINE=true`), and the gate fails when it is stale. Needs `sqlx-cli` 0.9 on the host (`cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features sqlite`; the `scripts/cargo` image has it).
+- New migration: `crates/store/migrations/NNNN_name.sql`, next number.
+- Regenerate the query cache after changing a query or a migration (also after a rebase that renumbered migrations):
+
+  ```sh
+  cd crates/store
+  export DATABASE_URL="sqlite://$PWD/../../target/sqlx-dev.db"
+  cargo sqlx database reset -y --source migrations && cargo sqlx prepare
+  ```
 
 ## Rules
 

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT expires_at FROM grants WHERE address = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "expires_at",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "grants",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "48e84a996a663bec3cca17e8ce95205909d9d916a6b76435b6f2351835d7ae22"
+}

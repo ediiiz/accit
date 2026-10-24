@@ -24,6 +24,7 @@ const PRODUCTION: &str = "profile: production
 public_origin: https://access.example.com
 trusted_proxy: 172.30.0.2
 proxy_token_file: /secrets/proxy-token
+database: /data/accit.db
 protection:
   mode: selected
 ";

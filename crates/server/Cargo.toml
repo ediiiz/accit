@@ -15,6 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 access.workspace = true
 config.workspace = true
+store.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 rust-embed.workspace = true
