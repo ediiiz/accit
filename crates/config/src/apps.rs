@@ -1,3 +1,4 @@
+use access::Hostname;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
@@ -8,6 +9,7 @@ use crate::origin;
 pub struct AppLink {
     pub name: String,
     pub url: String,
+    pub host: Hostname,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,8 +29,9 @@ impl RawApp {
             bail!("app link `{}` must be an https:// URL", self.name);
         };
 
-        origin::host_and_port(authority).with_context(|| format!("app link `{}`", self.name))?;
+        let (host, _) =
+            origin::host_and_port(authority).with_context(|| format!("app link `{}`", self.name))?;
 
-        Ok(AppLink { name: self.name, url: self.url })
+        Ok(AppLink { name: self.name, url: self.url, host })
     }
 }

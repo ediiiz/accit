@@ -20,7 +20,7 @@ use crate::health::Readiness;
 use crate::stats::{Stats, Status};
 use crate::trust::{self, Digested, ProxyTrust};
 
-const GATES_NOTHING: &str = "protection: selected mode without hosts; no host requires a Grant";
+pub(crate) const GATES_NOTHING: &str = "protection: selected mode without hosts; no host requires a Grant";
 
 /// What a reload may not change: the gate and the proxy trust were built from it at startup.
 #[derive(Debug)]
