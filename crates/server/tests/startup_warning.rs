@@ -1,13 +1,14 @@
-//! The `test` profile skips proxy checks; the startup warning names each skipped one
-//! (docs/spec.md section 3).
+//! Startup warnings: the `test` profile names each skipped proxy check (docs/spec.md section 3);
+//! a Policy that gates nothing is reported loudly (section 4).
 
 mod common;
 
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use common::{production, trust};
+use common::{config, grants, production, trust};
 use server::trust::ProxyTrust;
+use server::verify::Verifier;
 use tracing_subscriber::fmt::MakeWriter;
 
 const TEST_PROFILE: &str = "profile: test\nprotection:\n  mode: selected\n";
@@ -36,10 +37,14 @@ impl MakeWriter<'_> for Captured {
 }
 
 fn log_of(trust: &ProxyTrust) -> String {
+    captured(|| trust.log_startup())
+}
+
+fn captured(log: impl FnOnce()) -> String {
     let captured = Captured::default();
     let subscriber = tracing_subscriber::fmt().with_writer(captured.clone()).with_ansi(false).finish();
 
-    tracing::subscriber::with_default(subscriber, || trust.log_startup());
+    tracing::subscriber::with_default(subscriber, log);
 
     let bytes = captured.0.lock().map(|bytes| bytes.clone()).unwrap_or_default();
     String::from_utf8_lossy(&bytes).into_owned()
@@ -85,4 +90,25 @@ fn a_fully_configured_test_profile_does_not_warn() {
 #[test]
 fn production_does_not_warn() {
     assert_eq!(log_of(&production()), "");
+}
+
+async fn policy_log(protection: &str) -> String {
+    let yaml = format!("profile: test\nprotection:\n{protection}");
+    let verifier = Verifier::new(&config(&yaml), grants().await);
+
+    captured(|| verifier.log_startup())
+}
+
+#[tokio::test]
+async fn an_empty_selection_is_reported_loudly() {
+    let log = policy_log("  mode: selected\n").await;
+
+    assert!(log.contains("WARN"), "{log}");
+    assert!(log.contains("gates nothing"), "{log}");
+}
+
+#[tokio::test]
+async fn a_policy_that_gates_something_is_not_reported() {
+    assert_eq!(policy_log("  mode: selected\n  hosts: [jellyfin.example.com]\n").await, "");
+    assert_eq!(policy_log("  mode: all\n").await, "");
 }
