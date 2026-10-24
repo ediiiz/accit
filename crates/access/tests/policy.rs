@@ -2,6 +2,7 @@
 
 use access::{Hostname, Policy};
 
+#[allow(clippy::unwrap_used, reason = "test helper: an invalid fixture is a test bug")]
 fn host(name: &str) -> Hostname {
     Hostname::parse(name).unwrap()
 }
