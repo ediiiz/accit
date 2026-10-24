@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use axum::Router;
 use config::Config;
-use store::{Grants, Integrity, Limits};
+use store::{Grants, Limits};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -101,7 +101,6 @@ pub async fn run(config: Config) -> Result<()> {
     // Before serving, so no request sees readiness without the Grants behind it.
     let grants = open_grants(&config).await?;
     let integrity = grants.integrity();
-    readiness.set(*integrity.borrow() == Integrity::Sound);
     tokio::spawn(grants.clone().clean_up_every(CLEANUP));
     tokio::spawn(health::guard_clocks(readiness.clone(), SystemTime::now, CLOCK_CHECK));
 
@@ -111,9 +110,7 @@ pub async fn run(config: Config) -> Result<()> {
     let verify_app = verify::router(readiness.clone(), trust.clone(), verifier);
     let portal_app = portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system()));
 
-    tokio::select! {
-        result = serve_both(portal_listener, verify_listener, portal_app, verify_app, stopping) => result,
-        error = health::follow(readiness, integrity) => Err(error),
-        () = drain_after_signal(stop) => Ok(()),
-    }
+    let servers = serve_both(portal_listener, verify_listener, portal_app, verify_app, stopping);
+
+    health::supervise(servers, readiness, integrity, drain_after_signal(stop)).await
 }
