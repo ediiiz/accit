@@ -1,0 +1,54 @@
+---
+- name: Network | List Docker networks
+  ansible.builtin.command: docker network ls --quiet
+  register: accit_network_ids
+  changed_when: false
+
+- name: Network | Inspect Docker networks
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'network', 'inspect'] + accit_network_ids.stdout_lines }}"
+  register: accit_networks_inspect
+  changed_when: false
+
+- name: Network | Read subnets
+  ansible.builtin.set_fact:
+    accit_network_exists: "{{ networks | selectattr('Name', 'equalto', accit_name) | list | length > 0 }}"
+    accit_network_subnets:
+      "{{ networks | selectattr('Name', 'equalto', accit_name) | map(attribute='IPAM.Config') | select | flatten
+      | map(attribute='Subnet', default='') | select | list }}"
+    accit_other_subnets:
+      "{{ networks | rejectattr('Name', 'equalto', accit_name) | map(attribute='IPAM.Config') | select | flatten
+      | map(attribute='Subnet', default='') | select | unique | list }}"
+  vars:
+    networks: "{{ accit_networks_inspect.stdout | from_json }}"
+
+- name: Network | Keep the pinned subnet
+  ansible.builtin.assert:
+    that: accit_network_subnets == [subnet]
+    fail_msg: "Docker network {{ accit_name }} has {{ accit_network_subnets }}, not {{ subnet }}. Remove it (sb install mod-accit-remove) or set accit_role_network_subnet."
+    quiet: true
+  vars:
+    subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+  when: accit_network_exists
+
+- name: Network | Refuse an overlapping subnet
+  ansible.builtin.assert:
+    that: overlaps | length == 0
+    fail_msg: "{{ subnet }} overlaps Docker networks {{ overlaps }}: set accit_role_network_subnet and both addresses."
+    quiet: true
+  vars:
+    subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+    overlaps: "{{ subnet | accit_overlapping(accit_other_subnets) }}"
+  when: not accit_network_exists
+
+- name: Network | Create the accit network
+  community.docker.docker_network:
+    name: "{{ accit_name }}"
+    internal: true
+    ipam_config:
+      - subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+  when: not accit_network_exists
+
+- name: Network | Set docker_networks for accit.yaml
+  ansible.builtin.set_fact:
+    accit_docker_subnets: "{{ (accit_other_subnets + [lookup('role_var', '_network_subnet', role='accit')]) | unique }}"

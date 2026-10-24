@@ -1,0 +1,42 @@
+---
+# Issue #16 decision 21. Traefik first: with accit gone, every route still referencing accit@file fails.
+- name: Remove | Inspect Traefik
+  ansible.builtin.command: docker inspect {{ accit_traefik }}
+  register: accit_traefik_inspect
+  changed_when: false
+  failed_when: false
+
+- name: Remove | Refuse while Traefik uses accit
+  ansible.builtin.fail:
+    msg: |
+      Traefik still references accit. Delete these lines from the inventory (sb edit inventory):
+
+      {{ lookup('template', 'traefik-inventory.yml.j2') }}
+      Run `sb install traefik`, then re-run `sb install mod-accit-remove`.
+  when:
+    - accit_traefik_inspect.rc == 0
+    - ('accit@file' in accit_traefik_inspect.stdout) or (accit_name in (accit_traefik_inspect.stdout | from_json)[0].NetworkSettings.Networks)
+
+- name: Remove | Remove the Traefik dynamic file
+  ansible.builtin.file:
+    path: "{{ accit_dynamic_file }}"
+    state: absent
+
+- name: Remove | Remove Docker container
+  ansible.builtin.include_tasks: "{{ resources_tasks_path }}/docker/remove_docker_container.yml"
+
+- name: Remove | Remove the accit network
+  community.docker.docker_network:
+    name: "{{ accit_name }}"
+    state: absent
+
+- name: Remove | Purge {{ accit_location }}
+  ansible.builtin.file:
+    path: "{{ accit_location }}"
+    state: absent
+  when: accit_remove_purge | default(false) | bool
+
+- name: Remove | Note what stays
+  ansible.builtin.debug:
+    msg: "{{ accit_location }} is kept (database, config, client CA). Set accit_remove_purge: true to delete it."
+  when: not (accit_remove_purge | default(false) | bool)

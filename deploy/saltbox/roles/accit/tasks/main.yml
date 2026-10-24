@@ -1,0 +1,26 @@
+#########################################################################
+# Title:            accit: Saltbox role                                 #
+# URL:              https://github.com/ediiiz/accit                     #
+# --                                                                    #
+# Docs:             deploy/saltbox/README.md                            #
+#########################################################################
+---
+- name: Set paths
+  ansible.builtin.set_fact:
+    accit_container: "{{ lookup('role_var', '_docker_container', role='accit') }}"
+    accit_traefik: "{{ lookup('role_var', '_traefik_container', role='accit') }}"
+    accit_location: "{{ lookup('role_var', '_paths_location', role='accit') }}"
+    accit_config_dir: "{{ lookup('role_var', '_paths_config_lookup', role='accit') }}"
+    accit_data_dir: "{{ lookup('role_var', '_paths_data_lookup', role='accit') }}"
+    accit_pki_dir: "{{ lookup('role_var', '_paths_pki_lookup', role='accit') }}"
+    accit_backups_dir: "{{ lookup('role_var', '_paths_backups_lookup', role='accit') }}"
+    accit_dynamic_file: "{{ lookup('role_var', '_traefik_dynamic_file', role='accit') }}"
+    accit_ready_url: "http://{{ lookup('role_var', '_network_accit_address', role='accit') }}:8081/readyz"
+
+- name: Remove accit
+  ansible.builtin.include_tasks: remove.yml
+  when: ('accit-remove' in ansible_run_tags)
+
+- name: Deploy accit
+  ansible.builtin.include_tasks: deploy.yml
+  when: ('accit-remove' not in ansible_run_tags)

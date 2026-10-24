@@ -1,0 +1,14 @@
+---
+# The candidate is checked by the pinned image before it replaces the live file.
+- name: Config | Render accit.yaml
+  ansible.builtin.template:
+    src: accit.yaml.j2
+    dest: "{{ accit_config_dir }}/accit.yaml"
+    owner: root
+    group: "{{ gid }}"
+    mode: "0640"
+    validate: >-
+      docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true --user 0:0
+      -v {{ accit_config_dir }}:/config:ro -v %s:/candidate.yaml:ro
+      {{ lookup('role_var', '_docker_image', role='accit') }} admin check /candidate.yaml
+  register: accit_config_result

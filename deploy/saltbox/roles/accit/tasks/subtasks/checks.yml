@@ -1,0 +1,153 @@
+---
+# Issue #16 decision 9: every check here fails the run.
+- name: Checks | Read Traefik's version
+  ansible.builtin.command: docker exec {{ accit_traefik }} traefik version
+  register: accit_traefik_version
+  changed_when: false
+
+- name: Checks | Require Traefik v3.7.16 or later
+  ansible.builtin.assert:
+    that: error | length == 0
+    fail_msg: "{{ error }}: pin traefik_role_docker_image_tag to a later release, then sb install traefik."
+    quiet: true
+  vars:
+    error: "{{ accit_traefik_version.stdout | accit_traefik_version_error('3.7.16') }}"
+
+- name: Checks | Inspect accit
+  ansible.builtin.command: docker inspect {{ accit_container }}
+  register: accit_inspect
+  changed_when: false
+
+- name: Checks | Require accit's pinned address
+  ansible.builtin.assert:
+    that: ((accit_inspect.stdout | from_json)[0].NetworkSettings.Networks[accit_name].IPAddress | default('')) == address
+    fail_msg: "accit is not at {{ address }} on the {{ accit_name }} network."
+    quiet: true
+  vars:
+    address: "{{ lookup('role_var', '_network_accit_address', role='accit') }}"
+
+- name: Checks | Run accit admin check
+  ansible.builtin.command: docker exec {{ accit_container }} /accit admin check
+  register: accit_admin_check
+  changed_when: false
+
+- name: Checks | Show accit admin check
+  ansible.builtin.debug:
+    msg: "{{ accit_admin_check.stdout_lines }}"
+
+# Read over localhost inside Traefik (decision 11). Never the set-token middleware: its configuration holds the token.
+- name: Checks | Read the chain Traefik loaded
+  ansible.builtin.command:
+    argv:
+      - "docker"
+      - "exec"
+      - "{{ accit_traefik }}"
+      - "wget"
+      - "-q"
+      - "-O"
+      - "-"
+      - "--header"
+      - "Host: traefik"
+      - "http://localhost:8080/api/http/middlewares/{{ item }}"
+  loop:
+    - accit@file
+    - accit-delete-token@file
+  register: accit_loaded
+  until: accit_loaded.rc == 0
+  retries: 10
+  delay: 3
+  changed_when: false
+
+- name: Checks | Require the chain to remove the token before any app
+  ansible.builtin.assert:
+    that: error | length == 0
+    fail_msg: "{{ error }}"
+    quiet: true
+  vars:
+    error: "{{ (accit_loaded.results[0].stdout | from_json) | accit_chain_error(accit_loaded.results[1].stdout | from_json) }}"
+
+- name: Checks | Read Traefik's routers
+  ansible.builtin.command:
+    argv:
+      - "docker"
+      - "exec"
+      - "{{ accit_traefik }}"
+      - "wget"
+      - "-q"
+      - "-O"
+      - "-"
+      - "--header"
+      - "Host: traefik"
+      - "http://localhost:8080/api/http/routers?per_page=10000"
+  register: accit_routers
+  changed_when: false
+
+- name: Checks | Classify routers
+  ansible.builtin.set_fact:
+    accit_coverage: "{{ accit_routers.stdout | from_json | accit_coverage(policy) }}"
+  vars:
+    protection: "{{ lookup('role_var', '_protection_lookup', role='accit') }}"
+    policy: "{{ protection | combine({'portal': lookup('role_var', '_web_host_lookup', role='accit')}) }}"
+
+- name: Checks | Request a Gated host without a Grant
+  ansible.builtin.command:
+    argv:
+      - "curl"
+      - "-sS"
+      - "-k"
+      - "--max-time"
+      - "10"
+      - "-w"
+      - "\n%{http_code}"
+      - "--resolve"
+      - "{{ host }}:443:127.0.0.1"
+      - "https://{{ host }}/"
+  register: accit_gated_probe
+  changed_when: false
+  failed_when: accit_gated_probe.stdout_lines[-1:] != ['403'] or accit_gated_probe.stdout_lines[:1] != ['Forbidden']
+  vars:
+    host: "{{ (accit_coverage | selectattr('state', 'equalto', 'Gated') | rejectattr('host', 'equalto', '*') | first).host }}"
+  when: accit_coverage | selectattr('state', 'equalto', 'Gated') | rejectattr('host', 'equalto', '*') | list | length > 0
+
+- name: Checks | Note an empty selection
+  ansible.builtin.debug:
+    msg: "No Gated router in Traefik: nothing to probe."
+  when: accit_gated_probe is skipped
+
+- name: Checks | Open the Portal without a client certificate
+  ansible.builtin.command:
+    argv:
+      - "curl"
+      - "-sS"
+      - "-k"
+      - "--max-time"
+      - "10"
+      - "-o"
+      - "/dev/null"
+      - "-w"
+      - "%{http_code}"
+      - "--resolve"
+      - "{{ host }}:443:127.0.0.1"
+      - "https://{{ host }}/"
+  register: accit_portal_without
+  changed_when: false
+  failed_when: accit_portal_without.rc == 0
+  vars:
+    host: "{{ lookup('role_var', '_web_host_lookup', role='accit') }}"
+
+# Proves the failure above is the client certificate, not a missing server certificate.
+- name: Checks | Open the Portal with the shared certificate
+  ansible.builtin.shell: |
+    set -euo pipefail
+    password=$(cat "{{ accit_pki_dir }}/client.p12.password")
+    printf 'cert = "%s:%s"\n' "{{ accit_pki_dir }}/client.p12" "$password" \
+      | curl -K - --cert-type P12 -sS -k --max-time 10 -o /dev/null -w '%{http_code}' \
+          --resolve "{{ host }}:443:127.0.0.1" "https://{{ host }}/"
+  args:
+    executable: /bin/bash
+  register: accit_portal_with
+  changed_when: false
+  failed_when: accit_portal_with.rc != 0 or accit_portal_with.stdout == '000'
+  vars:
+    host: "{{ lookup('role_var', '_web_host_lookup', role='accit') }}"
+  when: lookup('role_var', '_client_ca_file', role='accit') | length == 0

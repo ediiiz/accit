@@ -1,0 +1,32 @@
+#!/bin/sh
+# Verifies the Saltbox role off a Saltbox host (issue #16 decision 23): filter tests, yamllint, syntax check,
+# templates rendered against tests/inventory/, ansible-lint. Never runs the role: that needs Saltbox and Docker.
+# Needs python3 and uv; the first run downloads the Ansible versions Saltbox pins (requirements-saltbox.txt).
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+export LC_ALL=C.UTF-8 ANSIBLE_NOCOLOR=1
+ansible="uvx --from ansible-core==2.21.2 --with ansible==14.2.0"
+
+step() { printf '\n== %s\n' "$1"; }
+
+step "filter tests"
+python3 -m unittest discover -s "$here/tests"
+
+step "yamllint"
+uvx yamllint==1.38.0 -c "$here/.yamllint" "$here/roles" "$here/tests"
+
+cd "$here/tests"
+step "syntax check"
+ANSIBLE_ROLES_PATH=../roles $ansible ansible-playbook -i localhost, --syntax-check saltbox_mod.yml
+
+step "render templates"
+for scenario in all selected; do
+  ANSIBLE_LOOKUP_PLUGINS=lookup_plugins ANSIBLE_FILTER_PLUGINS=../roles/accit/filter_plugins \
+    $ansible ansible-playbook -i localhost, render.yml -e scenario="$scenario"
+done
+
+step "ansible-lint"
+cd "$here"
+ANSIBLE_ROLES_PATH=roles uvx --from ansible-lint==26.6.0 --with ansible==14.2.0 ansible-lint roles/accit tests/saltbox_mod.yml tests/render.yml
+
+printf '\nSaltbox role checks passed\n'

@@ -1,0 +1,7 @@
+traefik_role_docker_commands_custom:
+  - --entrypoints.websecure.http.middlewares=accit@file
+  - --entrypoints.websecure.http.aliasHeadersStrategy={{ lookup('role_var', '_traefik_alias_headers_strategy', role='accit') }}
+  - --core.strictTLSOptions=true
+traefik_role_docker_networks_custom:
+  - name: {{ accit_name }}
+    ipv4_address: {{ lookup('role_var', '_network_traefik_address', role='accit') }}

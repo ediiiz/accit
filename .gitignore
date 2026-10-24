@@ -79,3 +79,6 @@ harness/run/
 # Client CA output (scripts/client-ca): the .p12 is a credential
 /client-ca/
 *.p12
+
+# ansible-lint cache (deploy/saltbox/check)
+.ansible/

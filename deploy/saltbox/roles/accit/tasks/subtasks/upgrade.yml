@@ -1,0 +1,32 @@
+---
+# docs/spec.md section 7 and issue #16 decision 8: copy the database before every tag change; a rollback
+# restores the copy from the older tag. The copy may hold Grants Revoked since, so a rollback discards Grants
+# (the restore procedure of docs/guides/operator.md section 7).
+- name: Upgrade | Stop accit
+  ansible.builtin.include_tasks: "{{ resources_tasks_path }}/docker/remove_docker_container.yml"
+  when: accit_upgrade.action in ['upgrade', 'rollback']
+
+- name: Upgrade | Copy the database of {{ accit_upgrade.save }}
+  ansible.builtin.shell: |
+    set -eu
+    cd "{{ accit_data_dir }}"
+    rm -f "{{ accit_backups_dir }}/accit-{{ accit_upgrade.save }}".db*
+    for file in accit.db accit.db-wal accit.db-shm; do
+      [ ! -e "$file" ] || cp -p "$file" "{{ accit_backups_dir }}/accit-{{ accit_upgrade.save }}.${file#accit.}"
+    done
+  changed_when: true
+  when: accit_upgrade.action in ['upgrade', 'rollback']
+
+- name: Upgrade | Restore the database of {{ accit_upgrade.restore }}
+  ansible.builtin.shell: |
+    set -eu
+    cd "{{ accit_data_dir }}"
+    rm -f accit.db accit.db-wal accit.db-shm
+    for suffix in db db-wal db-shm; do
+      copy="{{ accit_backups_dir }}/accit-{{ accit_upgrade.restore }}.$suffix"
+      [ ! -e "$copy" ] || cp -p "$copy" "accit.$suffix"
+    done
+    : > fail-closed
+    chown "{{ uid }}:{{ gid }}" accit.db* fail-closed
+  changed_when: true
+  when: accit_upgrade.action == 'rollback'
