@@ -1,0 +1,118 @@
+#!/bin/sh
+# Client CA and shared client certificate (docs/spec.md section 11). Run it on the admin's machine,
+# never on the server: the CA private key exists only in a temporary directory while this runs.
+#
+#   scripts/client-ca create [dir]   new CA, one-year shared leaf, password-protected client.p12
+#   scripts/client-ca rotate [dir]   the same with a new CA; the old CA certificate moves to retired/
+#
+# dir defaults to ./client-ca and ends up holding:
+#   ca.pem        public CA certificate: the server's client_ca_file
+#   client.p12    leaf and its key, for the Credential holders; hand over the password separately
+#
+# Password: $ACCIT_P12_PASSWORD, else asked twice on the terminal. At least 12 characters.
+# The .p12 uses the PBE-SHA1-3DES encoding with a SHA-1 MAC: OpenSSL 3's default (AES-256, SHA-256
+# MAC) is rejected by Apple's importers and older Android.
+set -eu
+umask 077
+
+LEAF_DAYS=365
+# One day longer, so that accit's 30-day warning on the CA also precedes the leaf's expiry.
+CA_DAYS=366
+MIN_PASSWORD=12
+
+die() {
+  printf 'client-ca: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+read_password() {
+  if [ -n "${ACCIT_P12_PASSWORD:-}" ]; then
+    return
+  fi
+  [ -t 0 ] || die "no terminal: set ACCIT_P12_PASSWORD"
+  printf 'Password for client.p12: ' >&2
+  saved=$(stty -g)
+  trap 'stty "$saved"' EXIT
+  stty -echo
+  read -r first
+  printf '\nRepeat: ' >&2
+  read -r second
+  stty "$saved"
+  printf '\n' >&2
+  [ "$first" = "$second" ] || die "passwords differ"
+  ACCIT_P12_PASSWORD=$first
+}
+
+# Writes ca.pem and client.p12 into $1. The keys live in $work and are removed on exit.
+issue() { # staging
+  staging=$1
+  ca_subject="/CN=accit client CA $(date -u +%Y-%m-%d) $(openssl rand -hex 2)"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days "$CA_DAYS" \
+    -subj "$ca_subject" -keyout "$work/ca.key" -out "$staging/ca.pem" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "subjectKeyIdentifier=hash" 2>/dev/null
+
+  printf '%s\n' "keyUsage=critical,digitalSignature" "extendedKeyUsage=clientAuth" \
+    "basicConstraints=critical,CA:FALSE" "subjectKeyIdentifier=hash" \
+    "authorityKeyIdentifier=keyid" >"$work/leaf.ext"
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=accit client" \
+    -keyout "$work/leaf.key" -out "$work/leaf.csr" 2>/dev/null
+  openssl x509 -req -in "$work/leaf.csr" -CA "$staging/ca.pem" -CAkey "$work/ca.key" -CAcreateserial \
+    -days "$LEAF_DAYS" -extfile "$work/leaf.ext" -out "$work/leaf.pem" 2>/dev/null
+
+  openssl pkcs12 -export -inkey "$work/leaf.key" -in "$work/leaf.pem" -name "accit client" \
+    -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1 \
+    -passout env:ACCIT_P12_PASSWORD -out "$staging/client.p12"
+  chmod 644 "$staging/ca.pem"
+}
+
+report() { # dir
+  printf 'CA certificate  %s/ca.pem  (public: the server'"'"'s client_ca_file)\n' "$1"
+  printf 'Shared leaf     %s/client.p12\n' "$1"
+  printf 'Leaf expires    %s\n' "$(openssl pkcs12 -in "$1/client.p12" -passin env:ACCIT_P12_PASSWORD -clcerts -nokeys 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)"
+  printf 'CA expires      %s\n' "$(openssl x509 -in "$1/ca.pem" -noout -enddate | cut -d= -f2)"
+  printf 'CA SHA-256      %s\n' "$(openssl x509 -in "$1/ca.pem" -noout -fingerprint -sha256 | cut -d= -f2)"
+}
+
+command=${1:-}
+[ $# -le 2 ] || usage
+dir=${2:-client-ca}
+case $command in
+  create) [ ! -e "$dir" ] || die "$dir exists; use rotate to replace its CA" ;;
+  rotate) [ -f "$dir/ca.pem" ] || die "no $dir/ca.pem to rotate" ;;
+  *) usage ;;
+esac
+command -v openssl >/dev/null || die "openssl not found"
+
+read_password
+[ "${#ACCIT_P12_PASSWORD}" -ge "$MIN_PASSWORD" ] || die "password needs at least $MIN_PASSWORD characters"
+export ACCIT_P12_PASSWORD
+
+# Keys go to memory-backed storage when there is some.
+secret_root=${TMPDIR:-/tmp}
+[ ! -d /dev/shm ] || [ ! -w /dev/shm ] || secret_root=/dev/shm
+work=$(mktemp -d "$secret_root/client-ca.XXXXXX")
+parent=$(dirname "$dir")
+mkdir -p "$parent"
+staging=$(mktemp -d "$parent/.client-ca.XXXXXX")
+trap 'rm -rf "$work" "$staging"' EXIT
+
+issue "$staging"
+
+if [ "$command" = create ]; then
+  mv "$staging" "$dir"
+else
+  retired=$dir/retired/$(date -u +%Y%m%dT%H%M%SZ)
+  mkdir -p "$retired"
+  mv "$dir/ca.pem" "$retired/ca.pem"
+  mv "$staging/ca.pem" "$staging/client.p12" "$dir/"
+fi
+chmod 700 "$dir"
+
+report "$dir"

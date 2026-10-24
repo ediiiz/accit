@@ -1,0 +1,129 @@
+#!/bin/sh
+# Behavioural test for scripts/client-ca: runs it in a temp dir and checks the result with openssl.
+# Expected values come from docs/spec.md section 11: one-year shared leaf, password-protected .p12,
+# rotation with a new CA, the CA private key never kept.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+script=$root/scripts/client-ca
+work=$(mktemp -d)
+server_pid=""
+cleanup() {
+  [ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null || true
+  rm -rf "$work"
+}
+trap cleanup EXIT
+
+PASSWORD="correct horse battery"
+export ACCIT_P12_PASSWORD="$PASSWORD"
+fails=0
+
+fail() { printf 'FAIL: %s\n' "$1" >&2; fails=$((fails + 1)); }
+ok() { printf 'ok: %s\n' "$1"; }
+check() { # description, command...
+  description=$1
+  shift
+  if "$@" >/dev/null 2>&1; then ok "$description"; else fail "$description"; fi
+}
+refuses() { # description, command...
+  description=$1
+  shift
+  if "$@" >/dev/null 2>&1; then fail "$description"; else ok "$description"; fi
+}
+text() { openssl x509 -in "$1" -noout -text; }
+has() { grep -q -- "$1"; }
+
+# Seconds between notBefore and notAfter, rounded to whole days.
+validity_days() {
+  start=$(openssl x509 -in "$1" -noout -startdate | cut -d= -f2)
+  end=$(openssl x509 -in "$1" -noout -enddate | cut -d= -f2)
+  echo $(($(($(date -d "$end" +%s) - $(date -d "$start" +%s))) / 86400))
+}
+
+# Extracts the leaf from a .p12 into <prefix>.pem and <prefix>.key.
+unpack() { # p12, prefix, password
+  ACCIT_UNPACK=$3 openssl pkcs12 -in "$1" -passin env:ACCIT_UNPACK -nodes -clcerts -nokeys -out "$2.pem" 2>/dev/null
+  ACCIT_UNPACK=$3 openssl pkcs12 -in "$1" -passin env:ACCIT_UNPACK -nodes -nocerts -out "$2.key" 2>/dev/null
+}
+
+# Does a TLS server that requires a client certificate signed by $1 accept the leaf $2/$3?
+handshake() { # ca.pem, leaf.pem, leaf.key
+  server_dir=$work/server
+  mkdir -p "$server_dir"
+  if [ ! -f "$server_dir/server.pem" ]; then
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+      -subj "/CN=localhost" -keyout "$server_dir/server.key" -out "$server_dir/server.pem" 2>/dev/null
+  fi
+  port=$((20000 + $$ % 20000 + ${PORT_OFFSET:-0}))
+  PORT_OFFSET=$((${PORT_OFFSET:-0} + 1))
+  openssl s_server -accept "127.0.0.1:$port" -cert "$server_dir/server.pem" -key "$server_dir/server.key" \
+    -CAfile "$1" -Verify 1 -verify_return_error -tls1_2 -naccept 1 -www >"$work/server.log" 2>&1 &
+  server_pid=$!
+  sleep 1
+  result=1
+  if { printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1; } | openssl s_client -connect "127.0.0.1:$port" -tls1_2 -cert "$2" -key "$3" \
+    -CAfile "$server_dir/server.pem" -ign_eof 2>/dev/null | grep -q '^HTTP/1.0 200'; then result=0; fi
+  kill "$server_pid" 2>/dev/null || true
+  wait "$server_pid" 2>/dev/null || true
+  server_pid=""
+  return $result
+}
+
+dir=$work/ca
+
+# --- create
+"$script" create "$dir" >"$work/create.out" 2>&1 || { cat "$work/create.out" >&2; fail "create runs"; }
+
+check "create writes ca.pem and client.p12" test -f "$dir/ca.pem" -a -f "$dir/client.p12"
+refuses "create keeps no private key in the clear" grep -rq 'PRIVATE KEY' "$dir"
+check "create leaves exactly two files" test "$(find "$dir" -type f | wc -l)" -eq 2
+check "directory is owner-only" test "$(stat -c %a "$dir")" = 700
+check "client.p12 is owner-only" test "$(stat -c %a "$dir/client.p12")" = 600
+check "the CA is a CA" sh -c "openssl x509 -in '$dir/ca.pem' -noout -text | grep -q 'CA:TRUE'"
+check "the CA signs certificates only" sh -c "openssl x509 -in '$dir/ca.pem' -noout -text | grep -q 'Certificate Sign'"
+
+unpack "$dir/client.p12" "$work/leaf" "$PASSWORD"
+check "the .p12 opens with its password" test -s "$work/leaf.pem" -a -s "$work/leaf.key"
+refuses "the .p12 does not open with another password" \
+  sh -c "ACCIT_UNPACK=wrong openssl pkcs12 -in '$dir/client.p12' -passin env:ACCIT_UNPACK -noout"
+refuses "the .p12 does not open without a password" \
+  sh -c "openssl pkcs12 -in '$dir/client.p12' -passin pass: -noout"
+check "the leaf is for client authentication" sh -c "openssl x509 -in '$work/leaf.pem' -noout -text | grep -q 'TLS Web Client Authentication'"
+refuses "the leaf is not a CA" sh -c "openssl x509 -in '$work/leaf.pem' -noout -text | grep -q 'CA:TRUE'"
+check "the leaf is signed by the CA" openssl verify -CAfile "$dir/ca.pem" -purpose sslclient "$work/leaf.pem"
+check "the leaf is valid for one year" test "$(validity_days "$work/leaf.pem")" -eq 365
+check "the CA outlives the leaf" test "$(validity_days "$dir/ca.pem")" -gt 365
+check "the .p12 carries only the leaf" test "$(openssl pkcs12 -in "$dir/client.p12" -passin env:ACCIT_P12_PASSWORD -nokeys 2>/dev/null | grep -c 'BEGIN CERTIFICATE')" -eq 1
+check "the .p12 carries one private key, the leaf's" test "$(openssl pkcs12 -in "$dir/client.p12" -passin env:ACCIT_P12_PASSWORD -nodes 2>/dev/null | grep -c 'BEGIN PRIVATE KEY')" -eq 1
+check "the output names the CA's fingerprint" grep -q "$(openssl x509 -in "$dir/ca.pem" -noout -fingerprint -sha256 | cut -d= -f2)" "$work/create.out"
+check "the output does not show the password" sh -c "! grep -q '$PASSWORD' '$work/create.out'"
+
+check "a server trusting the CA accepts the leaf" handshake "$dir/ca.pem" "$work/leaf.pem" "$work/leaf.key"
+
+refuses "create does not overwrite an existing CA" "$script" create "$dir"
+refuses "a short password is refused" env ACCIT_P12_PASSWORD=short "$script" create "$work/short"
+refuses "a missing password without a terminal is refused" env -u ACCIT_P12_PASSWORD "$script" create "$work/nopass" </dev/null
+check "a failed create leaves no directory behind" test ! -e "$work/short" -a ! -e "$work/nopass"
+refuses "rotate needs an existing CA" "$script" rotate "$work/none"
+
+# --- rotate
+cp "$dir/ca.pem" "$work/old-ca.pem"
+cp "$work/leaf.pem" "$work/old-leaf.pem"
+cp "$work/leaf.key" "$work/old-leaf.key"
+ACCIT_P12_PASSWORD="another long password" "$script" rotate "$dir" >"$work/rotate.out" 2>&1 \
+  || { cat "$work/rotate.out" >&2; fail "rotate runs"; }
+
+refuses "rotation installs a different CA" cmp -s "$dir/ca.pem" "$work/old-ca.pem"
+check "rotation keeps the old CA certificate under retired/" sh -c "cmp -s '$work/old-ca.pem' '$dir'/retired/*/ca.pem"
+refuses "rotation keeps no private key in the clear" grep -rq 'PRIVATE KEY' "$dir"
+
+unpack "$dir/client.p12" "$work/new" "another long password"
+check "the new .p12 opens with the new password" test -s "$work/new.pem" -a -s "$work/new.key"
+check "a server trusting the new CA accepts the new leaf" handshake "$dir/ca.pem" "$work/new.pem" "$work/new.key"
+refuses "a server trusting the new CA refuses the old leaf" handshake "$dir/ca.pem" "$work/old-leaf.pem" "$work/old-leaf.key"
+refuses "the old CA does not verify the new leaf" openssl verify -CAfile "$work/old-ca.pem" "$work/new.pem"
+
+if [ "$fails" -ne 0 ]; then
+  printf '%s check(s) failed\n' "$fails" >&2
+  exit 1
+fi
+echo "client-ca: all checks passed"
