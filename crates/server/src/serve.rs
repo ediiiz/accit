@@ -1,6 +1,7 @@
 //! One process, two listeners. SIGTERM stops both and drains for at most `DRAIN`.
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
@@ -10,6 +11,7 @@ use store::{Grants, Limits};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
+use crate::admin;
 use crate::health::{self, Readiness};
 use crate::portal::{self, Clock, Portal};
 use crate::trust::ProxyTrust;
@@ -90,7 +92,9 @@ async fn open_grants(config: &Config) -> Result<Grants> {
         .context("opening grant database")
 }
 
-pub async fn run(config: Config) -> Result<()> {
+/// `path` is where `config` came from; reloads read it again.
+pub async fn run(config: Config, path: &Path) -> Result<()> {
+    let hangup = admin::hangup()?;
     let portal_listener = bind(config.listen.portal).await?;
     let verify_listener = bind(config.listen.verify).await?;
     let (stop, stopping) = watch::channel(false);
@@ -107,6 +111,7 @@ pub async fn run(config: Config) -> Result<()> {
     trust.log_startup();
     let verifier = Verifier::new(&config, grants.clone());
     verifier.log_startup();
+    admin::start(hangup, config.admin_socket.as_deref(), &verifier, path)?;
     let verify_app = verify::router(readiness.clone(), trust.clone(), verifier.clone());
     let portal_app =
         portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system(), &verifier));

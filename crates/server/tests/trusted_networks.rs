@@ -145,12 +145,12 @@ async fn shared(first: &str) -> (Verifier, Portal) {
 
 #[tokio::test]
 async fn reload_moves_the_gate_and_the_portal_together() {
-    let (verifier, portal) = shared(&yaml("production", SELECTED)).await;
     let dir = tempfile::tempdir().unwrap();
     let (file, token) = (dir.path().join("accit.yaml"), dir.path().join("proxy-token"));
-    let reloaded = yaml("production", SELECTED)
-        .replace("192.168.1.0/24", "10.0.0.0/8")
-        .replace("/secrets/proxy-token", token.to_str().unwrap());
+    // A moved proxy_token_file needs a restart, so both configs name the same file.
+    let first = yaml("production", SELECTED).replace("/secrets/proxy-token", token.to_str().unwrap());
+    let (verifier, portal) = shared(&first).await;
+    let reloaded = first.replace("192.168.1.0/24", "10.0.0.0/8");
     std::fs::write(&token, TOKEN).unwrap();
     std::fs::write(&file, reloaded).unwrap();
     let api = portal::router(trust(&yaml("production", SELECTED)), portal);

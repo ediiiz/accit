@@ -1,7 +1,8 @@
 //! Verification listener: `/verify` for Traefik's `ForwardAuth`, liveness and readiness. Nothing else.
 //! Traefik passes a non-2xx answer through to the client, so bodies stay generic.
 
-use std::path::Path;
+use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::SystemTime;
 
@@ -16,7 +17,48 @@ use config::{Config, Profile};
 use store::Grants;
 
 use crate::health::Readiness;
-use crate::trust::{self, ProxyTrust};
+use crate::trust::{self, Digested, ProxyTrust};
+
+const GATES_NOTHING: &str = "protection: selected mode without hosts; no host requires a Grant";
+
+/// What a reload may not change: the gate and the proxy trust were built from it at startup.
+#[derive(Debug)]
+struct Fixed {
+    profile: Profile,
+    public_origin: Option<String>,
+    portal_host: Option<Hostname>,
+    trusted_proxy: Option<IpAddr>,
+    proxy_token_file: Option<PathBuf>,
+    proxy_token: Option<Digested>,
+}
+
+impl Fixed {
+    fn of(config: &Config) -> Self {
+        Self {
+            profile: config.profile,
+            public_origin: config.public_origin.clone(),
+            portal_host: config.portal_host.clone(),
+            trusted_proxy: config.trusted_proxy,
+            proxy_token_file: config.proxy_token_file.clone(),
+            proxy_token: config.proxy_token.as_ref().map(trust::digest_token),
+        }
+    }
+
+    fn changed_keys(&self, new: &Self) -> Vec<&'static str> {
+        [
+            ("profile", self.profile != new.profile),
+            ("public_origin", self.public_origin != new.public_origin),
+            ("trusted_proxy", self.trusted_proxy != new.trusted_proxy),
+            (
+                "proxy_token_file",
+                self.proxy_token_file != new.proxy_token_file || self.proxy_token != new.proxy_token,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(key, changed)| changed.then_some(key))
+        .collect()
+    }
+}
 
 /// The `protection` of the config: what a reload replaces.
 #[derive(Debug)]
@@ -29,8 +71,7 @@ struct Protection {
 struct Rules {
     /// Replaced whole on reload, so each decision sees one Policy and one set of Trusted networks.
     protection: RwLock<Arc<Protection>>,
-    portal_host: Option<Hostname>,
-    profile: Profile,
+    fixed: Fixed,
     grants: Grants,
 }
 
@@ -42,26 +83,37 @@ impl Verifier {
     pub fn new(config: &Config, grants: Grants) -> Self {
         Self(Arc::new(Rules {
             protection: RwLock::new(Arc::new(Protection::from(config))),
-            portal_host: config.portal_host.clone(),
-            profile: config.profile,
+            fixed: Fixed::of(config),
             grants,
         }))
     }
 
     /// docs/spec.md section 4: an empty selection is allowed but reported loudly.
     pub fn log_startup(&self) {
-        if self.protection().policy.gates_nothing() {
-            tracing::warn!("protection: selected mode without hosts; the Policy gates nothing");
-        }
+        self.log_warning();
     }
 
-    /// Applies the `protection` of the config at `path`. An invalid file changes nothing.
-    pub fn reload(&self, path: &Path) -> anyhow::Result<()> {
+    fn log_warning(&self) -> Option<&'static str> {
+        let warning = self.protection().policy.gates_nothing().then_some(GATES_NOTHING);
+
+        if let Some(warning) = warning {
+            tracing::warn!("{warning}");
+        }
+
+        warning
+    }
+
+    /// Applies the `protection` of the config at `path` and returns its warning, also logged.
+    /// An invalid file changes nothing.
+    pub fn reload(&self, path: &Path) -> anyhow::Result<Option<&'static str>> {
         let config = Config::load(path)?;
-        // The Policy was validated against the file's Portal host, and the gate keeps the running one.
+        let changed = self.0.fixed.changed_keys(&Fixed::of(&config));
+        // Applying these would need the gate and the proxy trust rebuilt together; a half-applied
+        // token rotation would report success while the old token still passes.
         anyhow::ensure!(
-            config.profile == self.0.profile && config.portal_host == self.0.portal_host,
-            "profile or public_origin changed in {}; restart required",
+            changed.is_empty(),
+            "{} changed in {}; restart required",
+            changed.join(", "),
             path.display()
         );
 
@@ -69,7 +121,7 @@ impl Verifier {
             Arc::new(Protection::from(&config));
         tracing::info!("policy reloaded");
 
-        Ok(())
+        Ok(self.log_warning())
     }
 
     fn protection(&self) -> Arc<Protection> {
@@ -86,8 +138,8 @@ impl Verifier {
         let gate = Gate {
             policy: &protection.policy,
             trusted: &protection.trusted,
-            portal_host: self.0.portal_host.as_ref(),
-            public_only: self.0.profile == Profile::Production,
+            portal_host: self.0.fixed.portal_host.as_ref(),
+            public_only: self.0.fixed.profile == Profile::Production,
         };
         let values = |name| headers.get_all(name).into_iter().map(HeaderValue::as_bytes);
 

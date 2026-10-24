@@ -8,6 +8,7 @@ use access::{Hostname, Policy, TrustedNetworks};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use crate::admin_socket;
 use crate::apps::{AppLink, RawApp};
 use crate::duration;
 use crate::listen::Listen;
@@ -188,8 +189,8 @@ impl Config {
             proxy_token,
             client_ca_file: raw.client_ca_file,
             listen: raw.listen,
+            admin_socket: admin_socket::resolve(raw.admin_socket, raw.database.as_deref()),
             database: raw.database,
-            admin_socket: raw.admin_socket,
         })
     }
 

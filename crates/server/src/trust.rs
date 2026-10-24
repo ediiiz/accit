@@ -9,17 +9,21 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use config::{Config, Profile};
+use config::{Config, Profile, ProxyToken};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 const TOKEN_HEADER: &str = "x-accit-proxy-token";
 
-type Digested = [u8; 32];
+pub(crate) type Digested = [u8; 32];
 
 /// Fixed-length digests keep the compare from leaking the token's length.
 fn digest(value: &[u8]) -> Digested {
     Sha256::digest(value).into()
+}
+
+pub(crate) fn digest_token(token: &ProxyToken) -> Digested {
+    digest(token.expose().as_bytes())
 }
 
 #[derive(Debug)]
@@ -56,7 +60,7 @@ impl ProxyTrust {
 
         Self(Arc::new(Rules {
             proxy: config.trusted_proxy,
-            token: config.proxy_token.as_ref().map(|token| digest(token.expose().as_bytes())),
+            token: config.proxy_token.as_ref().map(digest_token),
             portal_host: config.portal_host.clone(),
             skipped: skipped_checks(config),
             locked: production && !complete,
