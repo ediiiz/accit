@@ -55,7 +55,7 @@ pub async fn grants() -> Grants {
     Grants::open(None, limits, SystemTime::now()).await.unwrap()
 }
 
-/// The production config's gate, without Grants.
+/// The production config's gate, with an empty Grant store.
 pub async fn verifier() -> Verifier {
     Verifier::new(&config(PRODUCTION), grants().await)
 }

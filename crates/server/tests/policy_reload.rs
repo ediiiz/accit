@@ -1,5 +1,6 @@
 //! Policy reload (docs/spec.md section 4): applied whole, an invalid file keeps the previous
-//! Policy, and Grants survive any change of mode or lists.
+//! Policy, and Grants survive any change of mode or lists. A changed profile or Portal host needs
+//! a restart, so such a file is invalid for reload.
 
 #![allow(clippy::unwrap_used, reason = "test fixtures: a failure here is a test bug")]
 
@@ -16,11 +17,15 @@ use tempfile::TempDir;
 
 const GRANTED: &str = "81.2.69.160";
 const OTHER: &str = "81.2.69.161";
+const PRIVATE: &str = "192.168.1.20";
 
-fn production(token_file: &Path, protection: &str) -> String {
+const PRODUCTION: &str = "profile: production\npublic_origin: https://access.example.com";
+const TEST: &str = "profile: test\npublic_origin: https://access.example.com";
+const MOVED_PORTAL: &str = "profile: production\npublic_origin: https://portal.example.com";
+
+fn yaml(head: &str, token_file: &Path, protection: &str) -> String {
     format!(
-        "profile: production
-public_origin: https://access.example.com
+        "{head}
 trusted_proxy: 172.30.0.2
 proxy_token_file: {}
 database: /data/accit.db
@@ -43,10 +48,14 @@ struct Setup {
 
 impl Setup {
     fn new(protection: &str, grants: Grants) -> Self {
+        Self::with_head(PRODUCTION, protection, grants)
+    }
+
+    fn with_head(head: &str, protection: &str, grants: Grants) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (file, token) = (dir.path().join("accit.yaml"), dir.path().join("proxy-token"));
         std::fs::write(&token, TOKEN).unwrap();
-        let yaml = production(&token, protection);
+        let yaml = yaml(head, &token, protection);
         std::fs::write(&file, &yaml).unwrap();
         let verifier = Verifier::new(&config(&yaml), grants);
 
@@ -54,7 +63,11 @@ impl Setup {
     }
 
     fn write(&self, protection: &str) {
-        std::fs::write(&self.file, production(&self.token, protection)).unwrap();
+        self.write_with_head(PRODUCTION, protection);
+    }
+
+    fn write_with_head(&self, head: &str, protection: &str) {
+        std::fs::write(&self.file, yaml(head, &self.token, protection)).unwrap();
     }
 
     async fn status(&self, address: &str, host: &str) -> StatusCode {
@@ -122,4 +135,27 @@ async fn grants_survive_a_mode_switch() {
     setup.verifier.reload(&setup.file).unwrap();
     assert_eq!(setup.status(GRANTED, "jellyfin.example.com").await, StatusCode::NO_CONTENT);
     assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_changed_profile_is_refused_and_keeps_the_previous_policy() {
+    let setup = Setup::with_head(TEST, SELECTED, grants().await);
+    assert_eq!(setup.status(PRIVATE, "photos.example.com").await, StatusCode::NO_CONTENT);
+
+    setup.write_with_head(PRODUCTION, ALL);
+
+    assert!(setup.verifier.reload(&setup.file).is_err());
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+    assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_changed_portal_host_is_refused_and_keeps_the_previous_policy() {
+    let setup = Setup::new(SELECTED, grants().await);
+
+    setup.write_with_head(MOVED_PORTAL, "  mode: selected\n  hosts: [access.example.com]\n");
+
+    assert!(setup.verifier.reload(&setup.file).is_err());
+    assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::FORBIDDEN);
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
 }

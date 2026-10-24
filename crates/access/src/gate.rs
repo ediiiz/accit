@@ -17,7 +17,7 @@ pub enum Verdict {
     Deny,
 }
 
-fn single<'v>(values: impl IntoIterator<Item = &'v [u8]>) -> Option<&'v [u8]> {
+fn exactly_one<'v>(values: impl IntoIterator<Item = &'v [u8]>) -> Option<&'v [u8]> {
     let mut values = values.into_iter();
 
     match (values.next(), values.next()) {
@@ -41,7 +41,8 @@ impl Gate<'_> {
         else {
             return Verdict::Deny;
         };
-        let Some(host) = single(forwarded_host).and_then(|value| Hostname::from_forwarded_host(value).ok())
+        let Some(host) =
+            exactly_one(forwarded_host).and_then(|value| Hostname::from_forwarded_host(value).ok())
         else {
             return Verdict::Deny;
         };

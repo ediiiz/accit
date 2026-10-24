@@ -23,7 +23,7 @@ struct Rules {
     /// Replaced whole on reload, so each decision sees one Policy.
     policy: RwLock<Arc<Policy>>,
     portal_host: Option<Hostname>,
-    public_only: bool,
+    profile: Profile,
     grants: Grants,
 }
 
@@ -36,12 +36,12 @@ impl Verifier {
         Self(Arc::new(Rules {
             policy: RwLock::new(Arc::new(config.protection.clone())),
             portal_host: config.portal_host.clone(),
-            public_only: config.profile == Profile::Production,
+            profile: config.profile,
             grants,
         }))
     }
 
-    /// Docs/spec.md section 4: an empty selection is allowed but reported loudly.
+    /// docs/spec.md section 4: an empty selection is allowed but reported loudly.
     pub fn log_startup(&self) {
         if self.policy().gates_nothing() {
             tracing::warn!("protection: selected mode without hosts; the Policy gates nothing");
@@ -50,9 +50,15 @@ impl Verifier {
 
     /// Applies the `protection` of the config at `path`. An invalid file changes nothing.
     pub fn reload(&self, path: &Path) -> anyhow::Result<()> {
-        let policy = Config::load(path)?.protection;
+        let config = Config::load(path)?;
+        // The Policy was validated against the file's Portal host, and the gate keeps the running one.
+        anyhow::ensure!(
+            config.profile == self.0.profile && config.portal_host == self.0.portal_host,
+            "profile or public_origin changed in {}; restart required",
+            path.display()
+        );
 
-        *self.0.policy.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(policy);
+        *self.0.policy.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(config.protection);
         tracing::info!("policy reloaded");
 
         Ok(())
@@ -67,7 +73,7 @@ impl Verifier {
         let gate = Gate {
             policy: &policy,
             portal_host: self.0.portal_host.as_ref(),
-            public_only: self.0.public_only,
+            public_only: self.0.profile == Profile::Production,
         };
         let values = |name| headers.get_all(name).into_iter().map(HeaderValue::as_bytes);
 
@@ -95,7 +101,7 @@ fn uncached(status: StatusCode, body: &'static str) -> Response {
 /// Spec section 3 step 1: not ready is 503 before the caller is even looked at.
 async fn unready_first(State(readiness): State<Readiness>, request: Request, next: Next) -> Response {
     if request.uri().path() == "/verify" && !readiness.is_ready() {
-        return uncached(StatusCode::SERVICE_UNAVAILABLE, "Service Unavailable");
+        return uncached(StatusCode::SERVICE_UNAVAILABLE, "");
     }
 
     next.run(request).await

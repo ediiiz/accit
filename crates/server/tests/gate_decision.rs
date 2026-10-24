@@ -77,6 +77,7 @@ async fn step_1_not_ready_is_503_even_for_the_portal_host() {
     let call = verify_call(app, &[("x-forwarded-for", GRANTED), ("x-forwarded-host", PORTAL_HOST)]).await;
 
     assert_eq!(call.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(call.body, "");
     assert_eq!(call.cache.as_deref(), Some("no-store"));
 }
 
