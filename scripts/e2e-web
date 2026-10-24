@@ -1,0 +1,24 @@
+#!/bin/sh
+# Portal suite: Playwright (Chromium in a container on the harness's edge network) presents the test
+# client certificate to real Traefik. Needs a working Docker and `bun install`. Not part of scripts/ci.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+compose="docker compose -f $root/harness/compose.yml"
+
+down() { $compose down -v --remove-orphans >/dev/null 2>&1 || true; }
+trap down EXIT
+trap 'exit 130' INT TERM
+
+# tsconfig extends SvelteKit's generated $app/tsconfig, which Playwright reads.
+bun run --cwd "$root/apps/web" prebuild >/dev/null
+
+down
+"$root/harness/prepare"
+$compose up -d --wait --build
+
+status=0
+$compose run --rm browser || status=$?
+if [ "$status" -ne 0 ]; then
+  $compose logs --no-color --tail 200 >&2 || true
+fi
+exit "$status"

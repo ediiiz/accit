@@ -22,8 +22,6 @@
     },
     "test:unit": {},
     "test:component": {},
-    "test:e2e": {},
-    "test:a11y": {},
     "reset:data": {
       "cache": false
     },

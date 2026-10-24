@@ -89,6 +89,41 @@ services:
       edge:
         ipv4_address: 10.89.10.10
 
+  # Chromium on the edge network for the Portal suite (scripts/e2e-web); not started by `up`. The image
+  # tag must equal the @playwright/test version in bun.lock: it ships that version's browsers.
+  browser:
+    profiles: [browser]
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    init: true
+    ipc: host
+    working_dir: /repo/apps/web
+    environment:
+      E2E_BASE_URL: https://portal.accit.test
+    command:
+      [
+        "node",
+        "../../node_modules/@playwright/test/cli.js",
+        "test",
+        "--reporter=list",
+        "--output=/tmp/test-results",
+      ]
+    extra_hosts:
+      - "portal.accit.test:10.89.10.2"
+      - "gated.accit.test:10.89.10.2"
+      - "open.accit.test:10.89.10.2"
+    volumes:
+      - ../apps/web:/repo/apps/web:ro
+      - ../node_modules:/repo/node_modules:ro
+      - ./run/client:/repo/harness/run/client:ro
+    depends_on:
+      traefik:
+        condition: service_healthy
+      accit:
+        condition: service_healthy
+    networks:
+      edge:
+        ipv4_address: 10.89.10.13
+
 networks:
   edge:
     ipam:

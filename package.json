@@ -23,8 +23,6 @@
     "web:build": "turbo run build --filter=web",
     "web:test:unit": "turbo run test:unit --filter=web",
     "web:test:component": "turbo run test:component --filter=web",
-    "web:test:e2e": "turbo run test:e2e --filter=web",
-    "web:test:a11y": "turbo run test:a11y --filter=web",
     "build": "turbo run build --filter=web && scripts/cargo build --release -p server",
     "lint": "oxlint && turbo run lint --filter=web",
     "frontend:lint": "turbo run lint --filter=web",
