@@ -1,0 +1,15 @@
+# accit's config in the harness; `harness/prepare` copies it to harness/run/accit/.
+profile: test
+public_origin: https://portal.accit.test
+title: Harness
+trusted_proxy: 10.89.20.2
+proxy_token_file: /config/proxy-token
+client_ca_file: /config/client-ca.pem
+database: /data/accit.db
+protection:
+  mode: selected
+  hosts:
+    - gated.accit.test
+apps:
+  - name: Gated
+    url: https://gated.accit.test

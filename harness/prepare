@@ -1,0 +1,48 @@
+#!/bin/sh
+# Writes what the Compose harness mounts into harness/run/ (gitignored): throwaway PKI, proxy token,
+# configs. Modes are loose so the nonroot accit user can read them.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+run=$here/run
+
+rm -rf "$run"
+mkdir -p "$run/ca" "$run/traefik" "$run/client" "$run/accit" "$run/dynamic"
+
+ca() { # name
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 7 \
+    -subj "/CN=accit-e2e $1" -keyout "$run/ca/$1.key" -out "$run/ca/$1.pem" \
+    -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    2>/dev/null
+}
+
+leaf() { # ca name subject-alt-name-or-empty extended-key-usage
+  ext=$run/ca/$2.ext
+  {
+    echo "keyUsage=digitalSignature"
+    echo "extendedKeyUsage=$4"
+    [ -z "$3" ] || echo "subjectAltName=$3"
+  } >"$ext"
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=$2" \
+    -keyout "$run/ca/$2.key" -out "$run/ca/$2.csr" 2>/dev/null
+  openssl x509 -req -in "$run/ca/$2.csr" -CA "$run/ca/$1.pem" -CAkey "$run/ca/$1.key" \
+    -CAcreateserial -days 7 -extfile "$ext" -out "$run/ca/$2.pem" 2>/dev/null
+}
+
+ca server-ca
+ca client-ca
+leaf server-ca server "DNS:portal.accit.test,DNS:gated.accit.test,DNS:open.accit.test" serverAuth
+leaf client-ca client "" clientAuth
+
+cp "$run/ca/server.pem" "$run/ca/server.key" "$run/ca/client-ca.pem" "$run/traefik/"
+cp "$run/ca/server-ca.pem" "$run/ca/client.pem" "$run/ca/client.key" "$run/client/"
+
+token=$(openssl rand -hex 32)
+printf '%s\n' "$token" >"$run/accit/proxy-token"
+cp "$run/ca/client-ca.pem" "$run/accit/client-ca.pem"
+cp "$here/accit.yaml" "$run/accit/accit.yaml"
+sed "s/__PROXY_TOKEN__/$token/" "$here/traefik/accit.yml.in" >"$run/dynamic/accit.yml"
+
+# The CA keys stay in run/ca, which no container mounts.
+chmod -R a+rX "$run"
+chmod a+r "$run"/*/*.key
+chmod go-rwx "$run/ca"

@@ -1,0 +1,30 @@
+# Static configuration: docs/spec.md section 10.
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+core:
+  strictTLSOptions: true
+
+log:
+  level: INFO
+
+entryPoints:
+  websecure:
+    address: ":443"
+    http:
+      middlewares:
+        - accit@file
+      tls: {}
+  traefik:
+    address: ":8080"
+
+# Internal only (nothing is published): the health check and the e2e suite read it.
+ping: {}
+api:
+  insecure: true
+
+providers:
+  file:
+    directory: /dynamic
+    watch: true
