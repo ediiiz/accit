@@ -1,73 +1,68 @@
 //! The two listeners: what each one answers, and that the gate fails closed until accit is ready.
 
-use axum::Router;
-use axum::body::Body;
-use axum::http::{Method, Request, StatusCode, header};
+mod common;
+
+use axum::http::StatusCode;
+use common::{PROXY, TOKEN, TOKEN_HEADER, portal_router, production, send, verify_router};
 use server::health::Readiness;
-use server::{portal, verify};
-use tower::ServiceExt;
+use server::verify;
 
-#[allow(clippy::unwrap_used, reason = "test helper: a broken request is a test bug")]
-async fn call(app: Router, method: Method, path: &str) -> (StatusCode, Option<String>) {
-    let request = Request::builder().method(method).uri(path).body(Body::empty()).unwrap();
-    let response = app.oneshot(request).await.unwrap();
-    let cache = response.headers().get(header::CACHE_CONTROL).map(|value| value.to_str().unwrap().to_owned());
-
-    (response.status(), cache)
-}
+const FROM_PROXY: [(&str, &str); 1] = [(TOKEN_HEADER, TOKEN)];
 
 #[tokio::test]
 async fn liveness_answers_while_not_ready() {
-    let (status, _) = call(verify::router(Readiness::default()), Method::GET, "/healthz").await;
+    let app = verify::router(Readiness::default(), production());
 
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(send(app, Some(PROXY), "/healthz", &FROM_PROXY).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn readiness_reflects_state() {
     let readiness = Readiness::default();
 
-    let (before, _) = call(verify::router(readiness.clone()), Method::GET, "/readyz").await;
+    let app = verify::router(readiness.clone(), production());
+    let before = send(app, Some(PROXY), "/readyz", &FROM_PROXY).await;
     readiness.set(true);
-    let (after, _) = call(verify::router(readiness), Method::GET, "/readyz").await;
+    let app = verify::router(readiness, production());
+    let after = send(app, Some(PROXY), "/readyz", &FROM_PROXY).await;
 
-    assert_eq!(before, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(after, StatusCode::OK);
+    assert_eq!(before.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(after.status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn verify_is_unavailable_until_ready() {
-    let (status, cache) = call(verify::router(Readiness::default()), Method::GET, "/verify").await;
+    let app = verify::router(Readiness::default(), production());
+    let call = send(app, Some(PROXY), "/verify", &FROM_PROXY).await;
 
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(cache.as_deref(), Some("no-store"));
+    assert_eq!(call.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(call.cache.as_deref(), Some("no-store"));
 }
 
 #[tokio::test]
 async fn verify_denies_by_default_once_ready() {
-    let readiness = Readiness::default();
-    readiness.set(true);
+    let call = send(verify_router(production()), Some(PROXY), "/verify", &FROM_PROXY).await;
 
-    let (status, cache) = call(verify::router(readiness), Method::GET, "/verify").await;
-
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(cache.as_deref(), Some("no-store"));
+    assert_eq!(call.status, StatusCode::FORBIDDEN);
+    assert_eq!(call.cache.as_deref(), Some("no-store"));
 }
 
 #[tokio::test]
 async fn verify_listener_serves_nothing_else() {
     for path in ["/", "/api/status", "/verify/x", "/index.html"] {
-        let (status, _) = call(verify::router(Readiness::default()), Method::GET, path).await;
+        let call = send(verify_router(production()), Some(PROXY), path, &FROM_PROXY).await;
 
-        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(call.status, StatusCode::NOT_FOUND, "{path}");
     }
 }
 
 #[tokio::test]
 async fn portal_listener_does_not_answer_verification_paths() {
-    for path in ["/verify", "/healthz", "/readyz", "/api/unknown"] {
-        let (status, _) = call(portal::router(), Method::GET, path).await;
+    let headers = [(TOKEN_HEADER, TOKEN), ("host", common::PORTAL_HOST)];
 
-        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+    for path in ["/verify", "/healthz", "/readyz", "/api/unknown"] {
+        let call = send(portal_router(production()), Some(PROXY), path, &headers).await;
+
+        assert_eq!(call.status, StatusCode::NOT_FOUND, "{path}");
     }
 }
