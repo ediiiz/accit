@@ -18,7 +18,7 @@ use super::{App, Portal};
 
 #[derive(Debug, Serialize)]
 struct Status<'a> {
-    /// `none`, `active` or `expired`.
+    /// `none`, `active`, `expired` or `trusted`.
     state: &'static str,
     /// Unix seconds; `null` without a Grant.
     expiry: Option<u64>,
@@ -36,18 +36,36 @@ fn unix_seconds(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
+/// A Trusted network's Address needs no Grant; any Grant it holds is not reported.
+#[derive(Clone, Copy, Debug)]
+enum Standing {
+    Trusted,
+    Grant(GrantStatus),
+}
+
 impl Portal {
+    async fn standing(&self, address: Address, now: SystemTime) -> Result<Standing, ApiError> {
+        if self.0.verifier.is_trusted(address) {
+            return Ok(Standing::Trusted);
+        }
+
+        let grant = self.0.grants.status(address, now).await.map_err(|error| unavailable(&error))?;
+
+        Ok(Standing::Grant(grant))
+    }
+
     fn status_body(
         &self,
         address: Address,
-        grant: GrantStatus,
+        standing: Standing,
         now: SystemTime,
         csrf_token: String,
     ) -> Status<'_> {
-        let (state, expiry) = match grant {
-            GrantStatus::None => ("none", None),
-            GrantStatus::Active(expiry) => ("active", Some(expiry)),
-            GrantStatus::Expired(expiry) => ("expired", Some(expiry)),
+        let (state, expiry) = match standing {
+            Standing::Trusted => ("trusted", None),
+            Standing::Grant(GrantStatus::None) => ("none", None),
+            Standing::Grant(GrantStatus::Active(expiry)) => ("active", Some(expiry)),
+            Standing::Grant(GrantStatus::Expired(expiry)) => ("expired", Some(expiry)),
         };
 
         Status {
@@ -87,8 +105,8 @@ pub(super) async fn status(State(portal): State<Portal>, headers: HeaderMap) -> 
         .sessions
         .resume_or_start(session::cookie_id(&headers), now)
         .map_err(|_| ApiError::Unavailable)?;
-    let grant = portal.0.grants.status(address, now).await.map_err(|error| unavailable(&error))?;
-    let body = Json(portal.status_body(address, grant, now, session.token)).into_response();
+    let standing = portal.standing(address, now).await?;
+    let body = Json(portal.status_body(address, standing, now, session.token)).into_response();
 
     Ok(match session.started.as_deref().and_then(session_cookie) {
         Some(cookie) => ([(header::SET_COOKIE, cookie)], body).into_response(),
@@ -103,13 +121,23 @@ pub(super) async fn unlock(
 ) -> Result<Response, ApiError> {
     let checked = portal.checked(&headers, body).await?;
     let now = portal.0.clock.now();
+
+    if portal.0.verifier.is_trusted(checked.address) {
+        return Err(ApiError::Forbidden);
+    }
+
     let expiry = portal.0.grants.unlock(checked.address, now).await.map_err(|error| match error {
         UnlockError::Full => ApiError::Full,
         UnlockError::Store(error) => unavailable(&error),
     })?;
 
-    Ok(Json(portal.status_body(checked.address, GrantStatus::Active(expiry), now, checked.csrf_token))
-        .into_response())
+    Ok(Json(portal.status_body(
+        checked.address,
+        Standing::Grant(GrantStatus::Active(expiry)),
+        now,
+        checked.csrf_token,
+    ))
+    .into_response())
 }
 
 impl Portal {
@@ -134,7 +162,7 @@ pub(super) async fn revoke(
 
     portal.revoke_durably(checked.address, now).await?;
 
-    let grant = portal.0.grants.status(checked.address, now).await.map_err(|error| unavailable(&error))?;
+    let standing = portal.standing(checked.address, now).await?;
 
-    Ok(Json(portal.status_body(checked.address, grant, now, checked.csrf_token)).into_response())
+    Ok(Json(portal.status_body(checked.address, standing, now, checked.csrf_token)).into_response())
 }

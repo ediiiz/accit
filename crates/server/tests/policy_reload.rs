@@ -1,6 +1,6 @@
 //! Policy reload (docs/spec.md section 4): applied whole, an invalid file keeps the previous
-//! Policy, and Grants survive any change of mode or lists. A changed profile or Portal host needs
-//! a restart, so such a file is invalid for reload.
+//! Policy, and Grants survive any change of mode or lists. A changed profile, `public_origin` or proxy
+//! trust needs a restart, so such a file is invalid for reload.
 
 #![allow(clippy::unwrap_used, reason = "test fixtures: a failure here is a test bug")]
 
@@ -158,4 +158,69 @@ async fn a_changed_portal_host_is_refused_and_keeps_the_previous_policy() {
     assert!(setup.verifier.reload(&setup.file).is_err());
     assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::FORBIDDEN);
     assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_changed_public_origin_port_is_refused() {
+    let setup = Setup::new(SELECTED, grants().await);
+    let moved = setup.yaml.replace("https://access.example.com", "https://access.example.com:8443");
+
+    assert_restart_required(&setup, &moved.replace(SELECTED, ALL));
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+fn assert_restart_required(setup: &Setup, yaml: &str) {
+    std::fs::write(&setup.file, yaml).unwrap();
+
+    let error = format!("{:#}", setup.verifier.reload(&setup.file).unwrap_err());
+    assert!(error.contains("restart required"), "{error}");
+}
+
+#[tokio::test]
+async fn a_changed_trusted_proxy_is_refused_and_keeps_the_previous_policy() {
+    let setup = Setup::new(SELECTED, grants().await);
+
+    assert_restart_required(&setup, &setup.yaml.replace("172.30.0.2", "172.30.0.3").replace(SELECTED, ALL));
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_changed_proxy_token_file_is_refused() {
+    let setup = Setup::new(SELECTED, grants().await);
+    let moved = setup.token.with_file_name("rotated-token");
+    std::fs::write(&moved, TOKEN).unwrap();
+
+    let yaml = setup.yaml.replace(&setup.token.display().to_string(), &moved.display().to_string());
+    assert_restart_required(&setup, &yaml.replace(SELECTED, ALL));
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+/// Rotating the token in place must not report success while the old token still passes.
+#[tokio::test]
+async fn a_token_rotated_in_place_is_refused() {
+    let setup = Setup::new(SELECTED, grants().await);
+    std::fs::write(&setup.token, "rotated-proxy-token-value").unwrap();
+
+    assert_restart_required(&setup, &setup.yaml.replace(SELECTED, ALL));
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_reload_to_an_empty_selection_warns_that_no_host_requires_a_grant() {
+    let setup = Setup::new(SELECTED, grants().await);
+
+    setup.write("  mode: selected\n");
+    let warning = setup.verifier.reload(&setup.file).unwrap();
+
+    assert!(warning.is_some_and(|text| text.contains("no host requires a Grant")), "{warning:?}");
+    assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_reload_that_gates_hosts_does_not_warn() {
+    let setup = Setup::new(SELECTED, grants().await);
+
+    setup.write(ALL);
+
+    assert_eq!(setup.verifier.reload(&setup.file).unwrap(), None);
 }

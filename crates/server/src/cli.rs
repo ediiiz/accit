@@ -1,5 +1,6 @@
 //! Distroless images have no shell, so every operation is a command of the binary.
 
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
@@ -8,12 +9,13 @@ use config::Config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::serve;
+use crate::{admin, serve};
 
 const USAGE: &str = "Usage: accit [command]
 
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
+  admin reload  Reload the Policy in the running daemon (as SIGHUP does).
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
@@ -39,14 +41,42 @@ async fn healthcheck(config: &Config) -> Result<()> {
     Ok(())
 }
 
+async fn serve() -> Result<()> {
+    let path = config::path_from_env();
+
+    serve::run(Config::load(&path)?, &path).await
+}
+
+/// Errors come back as the daemon's message and a non-zero exit.
+async fn admin(args: &[String]) -> Result<()> {
+    let command = match args {
+        [command] if command == "reload" => command,
+        _ => bail!("unknown admin command {args:?}\n\n{USAGE}"),
+    };
+    let path = config::path_from_env();
+    let yaml = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let socket = config::admin_socket(&yaml)
+        .with_context(|| format!("in {}", path.display()))?
+        .with_context(|| format!("no admin_socket or database in {}", path.display()))?;
+    let answer = admin::request(&socket, command).await?;
+
+    Ok(std::io::stdout().write_all(answer.as_bytes())?)
+}
+
+fn help() {
+    tracing::info!("{USAGE}");
+}
+
 pub async fn run(args: &[String]) -> Result<()> {
-    let command = args.first().map_or("serve", String::as_str);
+    let (command, rest) =
+        args.split_first().map_or(("serve", &[][..]), |(command, rest)| (command.as_str(), rest));
 
     match command {
-        "serve" => serve::run(Config::load(&config::path_from_env())?).await,
+        "serve" => serve().await,
+        "admin" => admin(rest).await,
         "healthcheck" => healthcheck(&Config::load(&config::path_from_env())?).await,
         "-h" | "--help" | "help" => {
-            tracing::info!("{USAGE}");
+            help();
             Ok(())
         }
         _ => bail!("unknown command {command:?}\n\n{USAGE}"),

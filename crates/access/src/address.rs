@@ -51,14 +51,22 @@ const V6_SPECIAL: [(Ipv6Addr, u8); 3] = [
     (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),
 ];
 
+pub(crate) fn v4_mask(prefix: u8) -> u32 {
+    u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0)
+}
+
+pub(crate) fn v6_mask(prefix: u8) -> u128 {
+    u128::MAX.checked_shl(128 - u32::from(prefix)).unwrap_or(0)
+}
+
 fn v4_in(address: Ipv4Addr, (network, prefix): (Ipv4Addr, u8)) -> bool {
-    let mask = u32::MAX.checked_shl(32 - u32::from(prefix)).unwrap_or(0);
+    let mask = v4_mask(prefix);
 
     u32::from(address) & mask == u32::from(network) & mask
 }
 
 fn v6_in(address: Ipv6Addr, (network, prefix): (Ipv6Addr, u8)) -> bool {
-    let mask = u128::MAX.checked_shl(128 - u32::from(prefix)).unwrap_or(0);
+    let mask = v6_mask(prefix);
 
     u128::from(address) & mask == u128::from(network) & mask
 }
