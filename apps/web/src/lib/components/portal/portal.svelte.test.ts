@@ -262,7 +262,7 @@ describe("revoke", () => {
 
     await page.getByRole("dialog").getByRole("button", { name: "Disable access" }).click();
 
-    await expect.element(page.getByText("Access your apps.")).toBeVisible();
+    await expect.element(page.getByRole("status").getByText("Access your apps.")).toBeVisible();
     expect(mutations(calls)).toEqual(["revoke:token", "revoke:token"]);
   });
 
