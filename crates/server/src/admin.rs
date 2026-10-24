@@ -77,6 +77,7 @@ impl Daemon {
         match request {
             "reload" => reload(&self.verifier, &self.config)
                 .map(|warning| format!("policy reloaded\n{}", warning.map(warning_line).unwrap_or_default())),
+            "status" => Ok(self.verifier.status().to_string()),
             _ => bail!("unknown command {request:?}"),
         }
     }

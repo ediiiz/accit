@@ -17,6 +17,7 @@ const USAGE: &str = "Usage: accit [command]
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
   admin reload  Reload the Policy in the running daemon (as SIGHUP does).
+  admin status  Active Grants, verifications per minute and denials.
   admin check [file]
                 Validate a config without applying it (default: the running config):
                 coverage, warnings, client CA expiry.
@@ -74,7 +75,7 @@ async fn admin(args: &[String]) -> Result<()> {
     }
 
     let command = match args {
-        [command] if command == "reload" => command,
+        [command] if matches!(command.as_str(), "reload" | "status") => command,
         _ => bail!("unknown admin command {args:?}\n\n{USAGE}"),
     };
     let path = config::path_from_env();

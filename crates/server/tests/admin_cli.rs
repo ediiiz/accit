@@ -117,6 +117,25 @@ fn help_lists_admin_reload() {
 }
 
 #[test]
+fn help_lists_admin_status() {
+    let output = accit().arg("--help").output().unwrap();
+    let help = format!("{}{}", text(&output.stdout), text(&output.stderr));
+
+    assert!(output.status.success());
+    assert!(help.contains("admin status"), "{help}");
+}
+
+#[test]
+fn admin_status_prints_the_daemons_counters() {
+    let daemon = Daemon::start();
+
+    let status = daemon.admin("status");
+
+    assert!(status.status.success(), "{}", text(&status.stderr));
+    assert_eq!(text(&status.stdout), "active grants: 0\nverifications per minute: 0\ndenials: 0\n");
+}
+
+#[test]
 fn serve_opens_an_owner_only_admin_socket() {
     let daemon = Daemon::start();
 
