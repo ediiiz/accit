@@ -1,8 +1,8 @@
 {
-  "repo": "OWNER/REPO",
+  "repo": "ediiiz/accit",
   "host": "github.com",
-  "base": "main",
-  "postgres_container": "app-pg",
+  "base": "staging",
+  "postgres_container": "accit-pg",
   "postgres_user": "app",
   "slots": {
     "impl": 3,
