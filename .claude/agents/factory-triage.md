@@ -12,7 +12,7 @@ Fast, cheap judgement for the factory. The prompt names the mode.
 
 ## Mode `route <issue>`
 
-Read `gh issue view <issue>` and decide:
+Read `gh issue view <issue> --json title,body,comments` and decide:
 
 - **deep**: regulatory or numeric core (calculations, rule engines, prediction, optimisation), concurrency or job fan-out, or a state machine with many transitions.
 - **split**: more than about 8 acceptance criteria that span several screens and several tables, or two independent deliverables in one ticket.
