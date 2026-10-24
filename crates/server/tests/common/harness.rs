@@ -103,10 +103,10 @@ impl Harness {
         let seconds = Arc::new(AtomicU64::new(secs(t0())));
         let clock = Clock::new({
             let seconds = Arc::clone(&seconds);
-
             move || UNIX_EPOCH + Duration::from_secs(seconds.load(Ordering::SeqCst))
         });
-        let portal = Portal::new(&config, grants.clone(), readiness.clone(), clock);
+        let gate = server::verify::Verifier::new(&config, grants.clone());
+        let portal = Portal::new(&config, grants.clone(), readiness.clone(), clock, &gate);
         let app = portal::router(ProxyTrust::from_config(&config), portal);
 
         Self { app, grants, readiness, database, _dir: dir, clock: seconds }

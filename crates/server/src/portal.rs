@@ -25,6 +25,7 @@ pub use clock::Clock;
 use crate::health::Readiness;
 use crate::static_site;
 use crate::trust::{self, ProxyTrust};
+use crate::verify::Verifier;
 use error::ApiError;
 use limiter::Limiter;
 use session::Sessions;
@@ -40,6 +41,8 @@ struct Inner {
     grants: Grants,
     readiness: Readiness,
     clock: Clock,
+    /// The gate's rules, for Trusted networks: one source with `/verify`, so a reload moves both.
+    verifier: Verifier,
     /// The only `Origin` a mutation may carry; without it, every mutation is refused.
     origin: Option<String>,
     production: bool,
@@ -55,11 +58,18 @@ struct Inner {
 pub struct Portal(Arc<Inner>);
 
 impl Portal {
-    pub fn new(config: &Config, grants: Grants, readiness: Readiness, clock: Clock) -> Self {
+    pub fn new(
+        config: &Config,
+        grants: Grants,
+        readiness: Readiness,
+        clock: Clock,
+        verifier: &Verifier,
+    ) -> Self {
         Self(Arc::new(Inner {
             grants,
             readiness,
             clock,
+            verifier: verifier.clone(),
             origin: config.public_origin.clone(),
             production: config.profile == Profile::Production,
             title: config.title.clone(),
@@ -86,7 +96,7 @@ impl Portal {
         let values = headers.get_all("x-forwarded-for").iter().map(HeaderValue::as_bytes);
         let address = Address::from_forwarded_for(values).map_err(|_| ApiError::Forbidden)?;
 
-        if self.0.production && !address.is_public() {
+        if self.0.production && !address.is_public() && !self.0.verifier.is_trusted(address) {
             return Err(ApiError::Forbidden);
         }
 

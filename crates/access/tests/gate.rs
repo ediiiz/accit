@@ -1,7 +1,7 @@
 //! The gate decision, steps 3 to 8 of docs/spec.md section 3. Steps 1 (readiness) and 2 (proxy
 //! trust) belong to the verification listener.
 
-use access::{Address, Gate, Hostname, Policy, Verdict};
+use access::{Address, Cidr, Gate, Hostname, Policy, TrustedNetworks, Verdict};
 
 const PORTAL: &str = "access.example.com";
 const PUBLIC_V4: &str = "81.2.69.160";
@@ -27,7 +27,8 @@ fn decide_with(
     has_grant: impl FnOnce(Address) -> bool,
 ) -> Verdict {
     let portal = host(PORTAL);
-    let gate = Gate { policy, portal_host: Some(&portal), public_only: true };
+    let gate =
+        Gate { policy, trusted: &TrustedNetworks::default(), portal_host: Some(&portal), public_only: true };
 
     gate.decide(
         forwarded_for.iter().map(|value| value.as_bytes()),
@@ -147,7 +148,8 @@ fn step_3_production_rejects_a_non_public_address_before_any_pass() {
 fn the_test_profile_allows_non_public_addresses() {
     let policy = selected(&["jellyfin.example.com"]);
     let portal = host(PORTAL);
-    let gate = Gate { policy: &policy, portal_host: Some(&portal), public_only: false };
+    let trusted = TrustedNetworks::default();
+    let gate = Gate { policy: &policy, trusted: &trusted, portal_host: Some(&portal), public_only: false };
 
     for address in NON_PUBLIC {
         let open = gate.decide([address.as_bytes()], [b"photos.example.com".as_slice()], |_| false);
@@ -165,4 +167,73 @@ fn public_ipv6_and_6to4_addresses_pass_in_production() {
     for address in ["2a01:4f8::1", "2002:5102:45a0::1", "::ffff:81.2.69.160"] {
         assert_eq!(decide(&policy, address, "photos.example.com"), Verdict::Pass, "{address}");
     }
+}
+
+/// `192.168.1.0/24` and `fd12::/16` trusted, minus the router `192.168.1.1`.
+#[allow(clippy::unwrap_used, reason = "test helper: an invalid fixture is a test bug")]
+fn home() -> TrustedNetworks {
+    let ranges = ["192.168.1.0/24", "fd12::/16"].map(|text| text.parse::<Cidr>().unwrap());
+
+    TrustedNetworks::new(ranges, ["192.168.1.1".parse().unwrap()], &[]).unwrap()
+}
+
+fn decide_at_home(
+    policy: &Policy,
+    public_only: bool,
+    address: &str,
+    host: &str,
+    has_grant: impl FnOnce(Address) -> bool,
+) -> Verdict {
+    let trusted = home();
+    let gate = Gate { policy, trusted: &trusted, portal_host: None, public_only };
+
+    gate.decide([address.as_bytes()], [host.as_bytes()], has_grant)
+}
+
+#[test]
+fn step_5_a_trusted_address_passes_every_host_without_a_grant_in_both_modes() {
+    let selected = selected(&["jellyfin.example.com"]);
+    let all = Policy::All { excluded: [].into() };
+
+    for policy in [&selected, &all] {
+        for address in ["192.168.1.20", "fd12::20"] {
+            let verdict = decide_at_home(policy, true, address, "jellyfin.example.com", |_| false);
+
+            assert_eq!(verdict, Verdict::Pass, "{address}");
+        }
+    }
+}
+
+#[test]
+fn step_5_an_excluded_address_needs_a_grant_and_a_production_non_public_one_is_rejected() {
+    let policy = selected(&["jellyfin.example.com"]);
+
+    let test_profile = decide_at_home(&policy, false, "192.168.1.1", "jellyfin.example.com", |_| false);
+    let production = decide_at_home(&policy, true, "192.168.1.1", "photos.example.com", |_| true);
+
+    assert_eq!(test_profile, Verdict::Deny);
+    assert_eq!(production, Verdict::Deny);
+}
+
+#[test]
+fn step_5_a_private_address_outside_every_trusted_network_still_needs_a_grant() {
+    let policy = selected(&["jellyfin.example.com"]);
+
+    let production = decide_at_home(&policy, true, "192.168.2.20", "photos.example.com", |_| true);
+    let test_profile = decide_at_home(&policy, false, "192.168.2.20", "jellyfin.example.com", |_| false);
+
+    assert_eq!(production, Verdict::Deny);
+    assert_eq!(test_profile, Verdict::Deny);
+}
+
+#[test]
+fn step_5_a_public_ipv6_source_inside_the_home_still_needs_a_grant() {
+    let policy = Policy::All { excluded: [].into() };
+    let address = "2a01:4f8::1";
+
+    let without = decide_at_home(&policy, true, address, "jellyfin.example.com", |_| false);
+    let with = decide_at_home(&policy, true, address, "jellyfin.example.com", |_| true);
+
+    assert_eq!(without, Verdict::Deny);
+    assert_eq!(with, Verdict::Pass);
 }

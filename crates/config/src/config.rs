@@ -4,7 +4,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use access::{Hostname, Policy};
+use access::{Hostname, Policy, TrustedNetworks};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
@@ -14,6 +14,7 @@ use crate::listen::Listen;
 use crate::origin;
 use crate::protection::RawProtection;
 use crate::token::ProxyToken;
+use crate::trusted;
 
 const GRANT_DURATION_MIN: Duration = Duration::from_hours(1);
 const GRANT_DURATION_MAX: Duration = Duration::from_hours(30 * 24);
@@ -49,6 +50,7 @@ pub struct Config {
     pub audit_retention: Duration,
     pub apps: Vec<AppLink>,
     pub protection: Policy,
+    pub trusted_networks: TrustedNetworks,
     pub trusted_proxy: Option<IpAddr>,
     pub proxy_token_file: Option<PathBuf>,
     pub proxy_token: Option<ProxyToken>,
@@ -79,6 +81,8 @@ struct Raw {
     protection: RawProtection,
     trusted_proxy: Option<IpAddr>,
     proxy_token_file: Option<PathBuf>,
+    #[serde(default)]
+    docker_networks: Vec<String>,
     client_ca_file: Option<PathBuf>,
     #[serde(default)]
     listen: Listen,
@@ -163,6 +167,9 @@ impl Config {
         };
         let proxy_token =
             raw.proxy_token_file.as_deref().map(|path| read_token(path, read_file)).transpose()?;
+        let docker_networks = trusted::docker_networks(&raw.docker_networks)?;
+        let (protection, trusted_networks) =
+            raw.protection.validate(portal_host.as_ref(), &docker_networks)?;
 
         Ok(Self {
             profile: raw.profile,
@@ -173,7 +180,8 @@ impl Config {
             max_grants: raw.max_grants.get(),
             audit_retention: audit_retention(&raw.audit_retention)?,
             apps: raw.apps.into_iter().map(RawApp::validate).collect::<Result<_>>()?,
-            protection: raw.protection.validate(portal_host.as_ref())?,
+            protection,
+            trusted_networks,
             portal_host,
             trusted_proxy: raw.trusted_proxy.map(|address| address.to_canonical()),
             proxy_token_file: raw.proxy_token_file,

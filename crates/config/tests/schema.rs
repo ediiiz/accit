@@ -97,14 +97,9 @@ fn unknown_profile_and_mode_are_rejected() {
 fn unknown_keys_are_rejected_everywhere() {
     assert!(with("profiel: production\n").is_err());
     assert!(with("listen:\n  admin: 0.0.0.0:9000\n").is_err());
+    assert!(with("trusted_networks: [192.168.1.0/24]\n").is_err());
     assert!(parse("profile: test\nprotection:\n  mode: selected\n  hostz: []\n").is_err());
     assert!(with("apps:\n  - name: A\n    url: https://a.example.com\n    icon: a.png\n").is_err());
-}
-
-#[test]
-fn trusted_networks_wait_for_their_own_ticket() {
-    assert!(with("trusted_networks: [192.168.1.0/24]\n").is_err());
-    assert!(with("docker_networks: [172.30.0.0/24]\n").is_err());
 }
 
 #[test]
