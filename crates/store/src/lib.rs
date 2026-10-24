@@ -129,24 +129,10 @@ impl Grants {
         self.0.integrity.subscribe()
     }
 
-    /// Removes the Grant from memory first, so it stops passing even if the write then fails; a failed
-    /// or interrupted write fails closed (see [`Self::integrity`]).
+    /// Removes the Grant from memory first, so it stops passing even if the write then fails; a write that
+    /// fails or never finishes fails closed (see [`Self::integrity`]).
     pub async fn revoke(&self, address: Address, now: SystemTime) -> Result<(), StoreError> {
-        self.revoke_task(move |inner| async move { inner.revoke(address, now).await }).await
-    }
-
-    /// A task that died may have left the Grant out of memory but in the database.
-    async fn revoke_task<F>(&self, task: impl FnOnce(Arc<Inner>) -> F) -> Result<(), StoreError>
-    where
-        F: Future<Output = Result<(), StoreError>> + Send + 'static,
-    {
-        let result = self.mutate(task).await;
-
-        if matches!(result, Err(StoreError::Interrupted)) {
-            self.0.integrity.fail_closed();
-        }
-
-        result
+        self.mutate(move |inner| async move { inner.revoke(address, now).await }).await
     }
 
     /// Deletes Grants and audit events older than audit retention.
@@ -228,16 +214,24 @@ impl Inner {
     }
 
     async fn revoke(&self, address: Address, now: SystemTime) -> Result<(), StoreError> {
+        self.revoke_by(address, async |connection| database::revoke(connection, address, now).await).await
+    }
+
+    /// `write` is the durable step, so a test can make it fail or never finish.
+    async fn revoke_by(
+        &self,
+        address: Address,
+        write: impl AsyncFnOnce(&mut SqliteConnection) -> Result<(), StoreError>,
+    ) -> Result<(), StoreError> {
         let mut connection = self.database.lock().await;
 
         self.active.write().unwrap_or_else(PoisonError::into_inner).remove(&address);
-        let written = database::revoke(&mut connection, address, now).await;
+        // Held by the task, not its caller: a panic or cancellation fails closed with no one awaiting.
+        let unsaved = self.integrity.unsaved();
+        write(&mut connection).await?;
+        unsaved.saved();
 
-        if written.is_err() {
-            self.integrity.fail_closed();
-        }
-
-        written
+        Ok(())
     }
 
     async fn clean_up(&self, now: SystemTime) -> Result<(), StoreError> {
