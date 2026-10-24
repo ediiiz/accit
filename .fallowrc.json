@@ -11,5 +11,6 @@
   "rules": {
     "unused-dependencies": "warn",
     "unused-dev-dependencies": "warn"
-  }
+  },
+  "entry": ["tools/budget/web-budget-cli.ts", "tools/bench/bench.ts", "tools/**/*.test.ts"]
 }
