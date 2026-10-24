@@ -21,6 +21,25 @@ use tower::ServiceExt;
 mod faults;
 pub mod harness;
 
+pub type Headers = Vec<(String, String)>;
+
+pub fn header(name: &str, value: &str) -> (String, String) {
+    (name.to_owned(), value.to_owned())
+}
+
+pub fn without(mut headers: Headers, name: &str) -> Headers {
+    headers.retain(|(key, _)| key != name);
+
+    headers
+}
+
+pub fn replacing(headers: Headers, name: &str, value: &str) -> Headers {
+    let mut headers = without(headers, name);
+    headers.push(header(name, value));
+
+    headers
+}
+
 pub const PROXY: &str = "172.30.0.2";
 pub const TOKEN: &str = "s3cr3t-proxy-token-value";
 pub const PORTAL_HOST: &str = "access.example.com";

@@ -2,8 +2,12 @@
 
 mod common;
 
+use std::borrow::Cow;
+
 use axum::http::{Method, StatusCode};
-use common::harness::{Harness, Reply, header, ready, replacing, without};
+use common::harness::{Harness, Reply, ready};
+use common::{header, replacing, without};
+use server::portal::Files;
 
 fn assert_secure(reply: &Reply, what: &str) {
     let csp = reply.header("content-security-policy").unwrap_or_default();
@@ -93,4 +97,31 @@ async fn there_is_no_cors() {
     }
 
     assert_eq!(replies[0].status, StatusCode::METHOD_NOT_ALLOWED);
+}
+
+fn site(files: &'static [(&str, &str)]) -> Files {
+    Files::new(move |path| {
+        files.iter().find(|(name, _)| *name == path).map(|(_, body)| Cow::Borrowed(body.as_bytes()))
+    })
+}
+
+/// SHA-256 of `boot(1)`, from `printf 'boot(1)' | openssl dgst -sha256 -binary | base64`.
+const BOOT_HASH: &str = "'sha256-2DybWYCpP5bHxOJSoSgyyMeFgTOXm5f6FasJ7cSODcA='";
+
+#[tokio::test]
+async fn a_page_allows_its_own_inline_script_and_nothing_else_does() {
+    let harness = Harness::serving(site(&[
+        ("index.html", "<html><body><script>boot(1)</script></body></html>"),
+        ("app.js", "boot(1)"),
+    ]))
+    .await;
+    let browser = harness.browser();
+    let page = browser.request(Method::GET, "/", vec![], "").await;
+    let asset = browser.request(Method::GET, "/app.js", vec![], "").await;
+    let csp = page.header("content-security-policy").unwrap_or_default();
+
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(csp.split("; ").any(|part| part == format!("script-src 'self' {BOOT_HASH}")), "{csp}");
+    assert_eq!(asset.status, StatusCode::OK);
+    assert!(!asset.header("content-security-policy").unwrap_or_default().contains("script-src"));
 }

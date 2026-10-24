@@ -115,19 +115,19 @@ Verification listener (8081): `/verify`, `/healthz` (liveness), `/readyz` (stora
 
 One prerendered SvelteKit route, Paraglide (English, German; browser language, admin default), Tailwind, and only the components the screen needs. Initial HTML, CSS and JS under 150 KiB compressed, enforced in CI. No service worker, analytics, third-party fonts or CDNs.
 
-| State               | Content                                                                | Primary action        |
-| ------------------- | ---------------------------------------------------------------------- | --------------------- |
-| Not enabled         | "Access your apps." "Enable access for your current connection."       | Enable access         |
-| Submitting          | "Enabling access…"                                                     | Disabled, in progress |
-| Enabled             | "Access is enabled." "Available until [localized date/time]."          | Extend access         |
-| Expired             | "Your access has expired."                                             | Enable access         |
-| Connection changed  | "Your connection changed. Enable access again."                        | Enable access         |
-| Home network        | "You're on your home network. Your apps work without enabling access." | none                  |
-| Service unavailable | "We couldn't enable access. Please try again."                         | Try again             |
-| Rate limited        | "Please wait a moment before trying again."                            | Retry after countdown |
+| State               | Content                                                                                         | Primary action        |
+| ------------------- | ----------------------------------------------------------------------------------------------- | --------------------- |
+| Not enabled         | "Access your apps." "Enable access for your current connection."                                | Enable access         |
+| Submitting          | "Enabling access…"                                                                              | Disabled, in progress |
+| Enabled             | "Access is enabled." "Available until [localized date/time, including timezone]." **(changed)** | Extend access         |
+| Expired             | "Your access has expired."                                                                      | Enable access         |
+| Connection changed  | "Your connection changed. Enable access again."                                                 | Enable access         |
+| Home network        | "You're on your home network. Your apps work without enabling access."                          | none                  |
+| Service unavailable | "We couldn't enable access. Please try again."                                                  | Try again             |
+| Rate limited        | "Please wait a moment before trying again."                                                     | Retry after countdown |
 
 - "Connection changed": the Portal stores the Address of its last successful Unlock in `localStorage` and compares it with the status Address.
-- Secondary action "Disable access for this connection", with confirmation.
+- Secondary action "Disable access for this connection", with confirmation. If it fails, Service unavailable reads "We couldn't disable access. Please try again." **(changed)**
 - Tip: "To enable another device, connect this phone to the same Wi-Fi."
 - Troubleshooting panel: current Address and family.
 - Title configurable, default "Access".

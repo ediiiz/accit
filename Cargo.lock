@@ -1395,6 +1395,7 @@ dependencies = [
  "access",
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "config",
  "getrandom",
  "httpdate",

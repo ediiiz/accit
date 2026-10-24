@@ -14,13 +14,13 @@ use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use config::Config;
 use server::health::{self, Readiness};
-use server::portal::{self, Clock, Portal};
+use server::portal::{self, Clock, Files, Portal};
 use server::trust::ProxyTrust;
 use store::{Grants, Limits};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-use super::{PORTAL_HOST, PROXY, TOKEN, TOKEN_HEADER};
+use super::{Headers, PORTAL_HOST, PROXY, TOKEN, TOKEN_HEADER, header};
 
 pub const CLIENT: &str = "93.184.216.34";
 pub const ORIGIN: &str = "https://access.example.com";
@@ -63,6 +63,17 @@ pub struct Reply {
 }
 
 impl Reply {
+    async fn of(response: axum::response::Response) -> Self {
+        let (parts, body) = response.into_parts();
+        let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+
+        Self {
+            status: parts.status,
+            headers: parts.headers,
+            body: String::from_utf8(bytes.to_vec()).unwrap(),
+        }
+    }
+
     pub fn json(&self) -> serde_json::Value {
         serde_json::from_str(&self.body).unwrap_or_else(|_| panic!("not JSON: {}", self.body))
     }
@@ -88,6 +99,15 @@ impl Harness {
 
     /// `yaml` replaces the default configuration.
     pub async fn with(yaml: &str) -> Self {
+        Self::build(yaml, None).await
+    }
+
+    /// The default configuration with `files` as the built web app.
+    pub async fn serving(files: Files) -> Self {
+        Self::build(BASE, Some(files)).await
+    }
+
+    async fn build(yaml: &str, files: Option<Files>) -> Self {
         let config = Config::parse(yaml, |_| Ok(TOKEN.to_owned())).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let database = dir.path().join("accit.db");
@@ -107,7 +127,11 @@ impl Harness {
         });
         let gate = server::verify::Verifier::new(&config, grants.clone());
         let portal = Portal::new(&config, grants.clone(), readiness.clone(), clock, &gate);
-        let app = portal::router(ProxyTrust::from_config(&config), portal);
+        let trust = ProxyTrust::from_config(&config);
+        let app = match files {
+            Some(files) => portal::router_with(trust, portal, files),
+            None => portal::router(trust, portal),
+        };
 
         Self { app, grants, readiness, database, _dir: dir, clock: seconds }
     }
@@ -148,15 +172,7 @@ impl Harness {
         let peer: SocketAddr = format!("{PROXY}:40000").parse().unwrap();
         request.extensions_mut().insert(ConnectInfo(peer));
 
-        let response = self.app.clone().oneshot(request).await.unwrap();
-        let (parts, body) = response.into_parts();
-        let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap();
-
-        Reply {
-            status: parts.status,
-            headers: parts.headers,
-            body: String::from_utf8(bytes.to_vec()).unwrap(),
-        }
+        Reply::of(self.app.clone().oneshot(request).await.unwrap()).await
     }
 
     /// A request from the pinned proxy that lacks its token: refused before the Portal looks at it.
@@ -165,25 +181,6 @@ impl Harness {
 
         self.send(request.body(Body::empty()).unwrap()).await
     }
-}
-
-pub type Headers = Vec<(String, String)>;
-
-pub fn header(name: &str, value: &str) -> (String, String) {
-    (name.to_owned(), value.to_owned())
-}
-
-pub fn without(mut headers: Headers, name: &str) -> Headers {
-    headers.retain(|(key, _)| key != name);
-
-    headers
-}
-
-pub fn replacing(headers: Headers, name: &str, value: &str) -> Headers {
-    let mut headers = without(headers, name);
-    headers.push(header(name, value));
-
-    headers
 }
 
 pub struct Browser<'a> {
@@ -212,15 +209,7 @@ impl Browser<'_> {
         let peer: SocketAddr = format!("{PROXY}:40000").parse().unwrap();
         request.extensions_mut().insert(ConnectInfo(peer));
 
-        let response = self.harness.app.clone().oneshot(request).await.unwrap();
-        let (parts, body) = response.into_parts();
-        let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap();
-
-        Reply {
-            status: parts.status,
-            headers: parts.headers,
-            body: String::from_utf8(bytes.to_vec()).unwrap(),
-        }
+        Reply::of(self.harness.app.clone().oneshot(request).await.unwrap()).await
     }
 
     /// `GET /api/status` with this browser's cookie; keeps the session cookie and CSRF token.

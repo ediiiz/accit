@@ -16,7 +16,10 @@ export default defineConfig(({ mode }) => {
 
   // In dev and preview Vite forwards `/api/*` to the Portal listener; in
   // production the binary serves this app itself, on the same origin.
-  const apiProxy = { "/api": { target: env.BACKEND_URL } };
+  // Dev needs `X-Forwarded-For` (`xfwd`) and the `public_origin` of dev/accit.yaml as `Origin`.
+  const apiProxy = {
+    "/api": { target: env.BACKEND_URL, xfwd: true, headers: { origin: "https://localhost" } },
+  };
 
   const kit = {
     preprocess: vitePreprocess(),
