@@ -3,7 +3,8 @@
 mod common;
 
 use axum::http::{Method, StatusCode};
-use common::harness::{Harness, ORIGIN, address, header, ready, replacing, without};
+use common::harness::{Harness, ORIGIN, address, ready};
+use common::{header, replacing, without};
 
 const CLIENT: &str = "93.184.216.34";
 
@@ -132,7 +133,8 @@ async fn a_bad_csrf_token_is_refused() {
     let (browser, form) = ready(&harness).await;
     let token = browser.csrf().to_owned();
     let other = harness.browser().status().await.json()["csrf_token"].as_str().unwrap().to_owned();
-    let same_length_wrong = format!("{}0", &token[..token.len() - 1]);
+    let flipped = if token.ends_with('0') { '1' } else { '0' };
+    let same_length_wrong = format!("{}{flipped}", &token[..token.len() - 1]);
 
     for sent in [String::new(), "x".to_owned(), same_length_wrong, format!("{token}0"), other] {
         let reply = browser.post("/api/unlock", replacing(form.clone(), "x-csrf-token", &sent), "{}").await;
