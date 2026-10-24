@@ -5,7 +5,6 @@
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
-export CARGO="${CARGO:-cargo}"
 
 step() { printf '\n== %s\n' "$1"; }
 
