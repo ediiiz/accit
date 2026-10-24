@@ -9,19 +9,40 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use config::{Config, Profile, ProxyToken};
+use config::{Config, Profile};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 const TOKEN_HEADER: &str = "x-accit-proxy-token";
+
+type Digested = [u8; 32];
+
+/// Fixed-length digests keep the compare from leaking the token's length.
+fn digest(value: &[u8]) -> Digested {
+    Sha256::digest(value).into()
+}
 
 #[derive(Debug)]
 struct Rules {
     /// `None`: no proxy is pinned, which only the `test` profile allows; loopback stands in.
     proxy: Option<IpAddr>,
-    token: Option<ProxyToken>,
+    token: Option<Digested>,
     portal_host: Option<Hostname>,
+    /// Config keys left unset; only the `test` profile allows any.
+    skipped: Vec<&'static str>,
     /// Production without the keys it requires. Config loading rejects that; this is the backstop.
     locked: bool,
+}
+
+fn skipped_checks(config: &Config) -> Vec<&'static str> {
+    [
+        ("trusted_proxy", config.trusted_proxy.is_none()),
+        ("proxy_token_file", config.proxy_token.is_none()),
+        ("public_origin", config.portal_host.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(key, missing)| missing.then_some(key))
+    .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -35,16 +56,17 @@ impl ProxyTrust {
 
         Self(Arc::new(Rules {
             proxy: config.trusted_proxy,
-            token: config.proxy_token.clone(),
+            token: config.proxy_token.as_ref().map(|token| digest(token.expose().as_bytes())),
             portal_host: config.portal_host.clone(),
+            skipped: skipped_checks(config),
             locked: production && !complete,
         }))
     }
 
-    /// Without a pinned proxy, a loopback peer is trusted. For local development only.
+    /// Warns once, naming each proxy check that is skipped.
     pub fn log_startup(&self) {
-        if !self.0.locked && self.0.proxy.is_none() {
-            tracing::warn!("no trusted_proxy configured: trusting loopback peers (profile test)");
+        if !self.0.locked && !self.0.skipped.is_empty() {
+            tracing::warn!(skipped = %self.0.skipped.join(", "), "proxy checks skipped (profile test)");
         }
     }
 
@@ -62,7 +84,7 @@ impl ProxyTrust {
         let mut values = headers.get_all(TOKEN_HEADER).iter();
 
         match (values.next(), values.next()) {
-            (Some(sent), None) => sent.as_bytes().ct_eq(expected.expose().as_bytes()).into(),
+            (Some(sent), None) => digest(sent.as_bytes()).ct_eq(expected).into(),
             _ => false,
         }
     }

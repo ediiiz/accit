@@ -805,6 +805,7 @@ dependencies = [
  "axum",
  "config",
  "rust-embed",
+ "sha2",
  "subtle",
  "tokio",
  "tower",
