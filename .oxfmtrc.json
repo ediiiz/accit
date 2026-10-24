@@ -1,6 +1,6 @@
 {
   "ignorePatterns": [
-    ".sqlx/**",
+    "**/.sqlx/**",
     "vendor/**",
     "target/**",
     ".agent/**",

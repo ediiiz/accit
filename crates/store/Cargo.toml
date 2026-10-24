@@ -1,0 +1,20 @@
+[package]
+name = "store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+access.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

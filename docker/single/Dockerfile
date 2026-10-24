@@ -37,6 +37,8 @@ RUN bunx turbo@${TURBO_VERSION} run build --filter=web
 
 FROM rust:${RUST_VERSION}-trixie AS server
 WORKDIR /src
+# sqlx macros use the checked-in query cache (crates/store/.sqlx).
+ENV SQLX_OFFLINE=true
 COPY Cargo.toml Cargo.lock clippy.toml rustfmt.toml ./
 COPY crates crates
 # rust-embed reads this folder at compile time.

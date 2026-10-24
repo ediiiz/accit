@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT action, address, at FROM audit_events ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "action",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "name": "address",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "address"
+          }
+        }
+      },
+      {
+        "name": "at",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "audit_events",
+            "name": "at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b2446c6bb52d993014a328e63904b773c36e3d953e3d86cb88bc17f695ae7a7b"
+}

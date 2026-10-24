@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT address, expires_at FROM grants WHERE expires_at > ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "address",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "grants",
+            "name": "address"
+          }
+        }
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "grants",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "4a441c98758f900474347c603abb7416a65682fb6cb5c9a05e1148f59100ddb8"
+}

@@ -1,11 +1,12 @@
 //! One process, two listeners. SIGTERM stops both and drains for at most `DRAIN`.
 
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use axum::Router;
 use config::Config;
+use store::{Grants, Limits};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
@@ -13,6 +14,7 @@ use crate::health::Readiness;
 use crate::{portal, verify};
 
 const DRAIN: Duration = Duration::from_secs(10);
+const CLEANUP: Duration = Duration::from_hours(1);
 
 async fn bind(address: SocketAddr) -> Result<TcpListener> {
     TcpListener::bind(address).await.with_context(|| format!("binding {address}"))
@@ -63,20 +65,41 @@ async fn drain_after_signal(stop: watch::Sender<bool>) {
 fn log_start(portal_listener: &TcpListener, verify_listener: &TcpListener) -> Result<()> {
     let (portal_address, verify_address) = (portal_listener.local_addr()?, verify_listener.local_addr()?);
 
-    tracing::info!(portal = %portal_address, verify = %verify_address, "listening; no grant state yet, verification fails closed");
+    tracing::info!(portal = %portal_address, verify = %verify_address, "listening");
 
     Ok(())
+}
+
+async fn open_grants(config: &Config) -> Result<Grants> {
+    let limits = Limits {
+        grant_duration: config.grant_duration,
+        max_grants: config.max_grants,
+        audit_retention: config.audit_retention,
+    };
+
+    if config.database.is_none() {
+        tracing::warn!("no database configured; grants are lost on restart");
+    }
+
+    Grants::open(config.database.as_deref(), limits, SystemTime::now())
+        .await
+        .context("opening grant database")
 }
 
 pub async fn run(config: Config) -> Result<()> {
     let portal_listener = bind(config.listen.portal).await?;
     let verify_listener = bind(config.listen.verify).await?;
     let (stop, stopping) = watch::channel(false);
+    let readiness = Readiness::default();
 
     log_start(&portal_listener, &verify_listener)?;
+    // Before serving, so no request sees readiness without the Grants behind it.
+    let grants = open_grants(&config).await?;
+    readiness.set(true);
+    tokio::spawn(grants.clean_up_every(CLEANUP));
 
     tokio::select! {
-        result = serve_both(portal_listener, verify_listener, Readiness::default(), stopping) => result,
+        result = serve_both(portal_listener, verify_listener, readiness, stopping) => result,
         () = drain_after_signal(stop) => Ok(()),
     }
 }

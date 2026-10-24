@@ -1,16 +1,22 @@
 #!/bin/sh
-# Rust quality gate (CI and before commit): format, lints as errors, file length, tests.
+# Rust quality gate (CI and before commit): format, lints as errors, file length, sqlx query
+# cache, tests.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-# $CARGO wins; else the host toolchain; else the pinned image (scripts/cargo).
+# $CARGO wins; else the host toolchain; else the pinned image (scripts/cargo), which mounts the
+# repo at /work.
+work=$root
 if [ -n "${CARGO:-}" ]; then
   cargo=$CARGO
 elif command -v cargo >/dev/null 2>&1; then
   cargo=cargo
 else
   cargo="$root/scripts/cargo"
+  work=/work
 fi
 max_lines=300
+# sqlx macros compile against the checked-in query cache (crates/store/.sqlx), never a live database.
+export SQLX_OFFLINE=true
 
 "$cargo" fmt --check
 "$cargo" clippy --workspace --all-targets -- -D warnings
@@ -22,5 +28,15 @@ if [ -n "$long" ]; then
   echo "$long" >&2
   exit 1
 fi
+
+# The query cache matches the migrations and the queries.
+rm -f "$root"/target/sqlx-check.db*
+mkdir -p "$root/target"
+(
+  cd "$root/crates/store"
+  export SQLX_OFFLINE=false DATABASE_URL="sqlite://$work/target/sqlx-check.db"
+  "$cargo" sqlx database setup --source migrations >/dev/null
+  "$cargo" sqlx prepare --check
+)
 
 "$cargo" test --workspace
