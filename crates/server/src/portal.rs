@@ -21,6 +21,7 @@ use serde::Serialize;
 use store::Grants;
 
 pub use clock::Clock;
+pub(crate) use headers::InlineScripts;
 
 use crate::health::Readiness;
 use crate::static_site;

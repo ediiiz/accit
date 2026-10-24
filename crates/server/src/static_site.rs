@@ -6,6 +6,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
+use crate::portal::InlineScripts;
+
 #[derive(Embed)]
 #[folder = "../../apps/web/build"]
 #[allow_missing = true]
@@ -60,11 +62,19 @@ pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     };
     let mime = mime_type(&route);
+    let scripts = (extension(&route) == "html")
+        .then(|| std::str::from_utf8(&file.data).map(InlineScripts::of).ok())
+        .flatten();
     let (encoding, body) = match encoded(&route, &headers) {
         Some((encoding, file)) => (Some(encoding), file.data),
         None => (None, file.data),
     };
     let mut response = Response::new(Body::from(body.into_owned()));
+
+    if let Some(scripts) = scripts {
+        response.extensions_mut().insert(scripts);
+    }
+
     let response_headers = response.headers_mut();
 
     response_headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));

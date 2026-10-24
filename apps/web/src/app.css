@@ -106,3 +106,13 @@
     @apply tracking-tight text-balance;
   }
 }
+
+/* Nothing moves for users who opted out (docs/spec.md section 9). Unlayered, so it beats utilities. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation: none;
+    transition: none;
+  }
+}
