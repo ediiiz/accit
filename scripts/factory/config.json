@@ -2,18 +2,17 @@
   "repo": "ediiiz/accit",
   "host": "github.com",
   "base": "staging",
-  "postgres_container": "accit-pg",
-  "postgres_user": "app",
   "slots": {
     "impl": 3,
     "merge": 1
   },
-  "cargo_build_jobs": 3,
-  "slot_target_cap_gb": 12,
+  "cargo_build_jobs": 2,
   "disk_pause_free_gb": 30,
   "disk_critical_free_gb": 15,
   "max_attempts": 3,
   "max_parallel_reviews": 4,
-  "require_ci": true,
-  "golden_paths": ["golden", "/fixtures/", "/oracle/cases/"]
+  "require_ci": false,
+  "golden_paths": [],
+  "cargo": "cargo",
+  "migrations": "crates/store/migrations"
 }

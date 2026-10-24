@@ -14,7 +14,7 @@ Gate, Grant and API rules are tested in Rust (`crates/`, `scripts/check-rust`) a
 
 From `apps/web`: `bun run test:unit`, `bun run test:component`, `bun run test:vitest`, `bun run test:e2e`. From the repo root: `bun run web:test:unit`, `web:test:component`, `web:test:e2e`.
 
-CI (`.github/workflows/check.yml`) runs unit and component tests.
+`scripts/ci` (repo root) runs unit and component tests with the rest of the local CI; GitHub Actions does not run them.
 
 ## Policy
 

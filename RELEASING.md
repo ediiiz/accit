@@ -43,8 +43,7 @@ grouping and which types are release-worthy.
   `staging → main` PRs. Tag pushes from the release workflow are unaffected.
 - Settings → Actions → General: workflow permissions "Read and write", so
   `GITHUB_TOKEN` can push the tag, create the release and push to GHCR.
-- Optional: `INFRA_REPO` variable + `INFRA_TOKEN` secret for the promote job,
-  `PREVIEW_DOMAIN` variable for PR previews.
+- Optional: `INFRA_REPO` variable + `INFRA_TOKEN` secret for the promote job.
 - No image-build variables are required — the container image is origin-portable
   (`SITE_URL` is set at deploy time, not build). See
   [docker/single/README.md](docker/single/README.md).

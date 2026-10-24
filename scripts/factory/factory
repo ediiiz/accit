@@ -5,7 +5,7 @@
   status                        snapshot for one loop tick
   claim <issue>                 take a free impl slot, new branch factory/<issue>
   checkout <pr> impl|merge      take a free slot, check out the PR branch (fix or integrate)
-  release <slot>                free a slot and shrink it
+  release <slot>                free a slot and run cargo clean in it
   route <issue> std|deep|split  record triage decision
   run start|end <role> <target> track a slot-less agent (triage, reviewer, splitter)
   opened <issue> <pr>           implementer finished: PR goes to review
@@ -129,8 +129,6 @@ def cmd_checkout(store, forge, pr, kind):
         state["slots"][slot] = {"issue": issue_of_branch(branch), "pr": int(pr), "since": int(time.time()),
                                 "role": "fix" if kind == "impl" else "integrate", "branch": branch}
     info = prepare_or_free(store, slot, branch=branch)
-    if kind == "merge":
-        slots.ensure_db(store, slot, reset=True)
     reviews = sorted(str(p) for p in (store.dir / "reviews").glob(f"{pr}-*.md"))
     out({**info, "pr": int(pr), "issue": issue_of_branch(branch), "reviews": reviews})
 
@@ -309,7 +307,7 @@ def cmd_split(store, forge, parent, files):
 
 def cmd_renumber():
     base = f"origin/{CFG['base']}"
-    mig = "crates/model/migrations"
+    mig = CFG["migrations"]
     on_base = slots.sh("git", "ls-tree", "--name-only", f"{base}:{mig}").splitlines()
     top = max((int(m[:4]) for m in on_base if re.match(r"\d{4}_", m)), default=0)
     added = sorted(Path(p).name for p in slots.sh(

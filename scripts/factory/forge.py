@@ -1,8 +1,10 @@
-"""GitHub REST client for the factory. The token comes from `gh auth token` and is never printed."""
+"""GitHub REST client for the factory. The token comes from gh (see `gh_token`) and is never printed."""
 
 import json
+import os
 import re
 import subprocess
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,8 +23,7 @@ class Forge:
         # GitHub Enterprise Server serves the REST API under /api/v3.
         base = "https://api.github.com" if host == "github.com" else f"https://{host}/api/v3"
         self.api = f"{base}/repos/{cfg['repo']}"
-        self._token = subprocess.run(["gh", "auth", "token", "--hostname", host], check=True,
-                                     capture_output=True, text=True).stdout.strip()
+        self._token = gh_token(host)
         self._labels = None
 
     def call(self, method, path, body=None):
@@ -114,6 +115,23 @@ class Forge:
         self.call("PUT", f"/pulls/{pr}/merge", {"merge_method": "merge", "commit_title": title})
         branch = urllib.parse.quote(pr_obj["head"]["ref"], safe="")
         self.call("DELETE", f"/git/refs/heads/{branch}")
+
+
+def gh_token(host):
+    """GH_TOKEN, else `gh auth token`, else gh's hosts.yml (gh before 2.17 has no `auth token`)."""
+    if os.environ.get("GH_TOKEN"):
+        return os.environ["GH_TOKEN"]
+    res = subprocess.run(["gh", "auth", "token", "--hostname", host], capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip()
+    hosts = Path(os.environ.get("GH_CONFIG_DIR", Path.home() / ".config" / "gh")) / "hosts.yml"
+    current = None
+    for line in hosts.read_text().splitlines():
+        if line and not line.startswith(" "):
+            current = line.rstrip(":").strip()
+        elif current == host and line.strip().startswith("oauth_token:"):
+            return line.split(":", 1)[1].strip()
+    raise SystemExit(f"no GitHub token for {host}: run `gh auth login` or set GH_TOKEN")
 
 
 def blockers(issue):

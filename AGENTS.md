@@ -78,7 +78,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/`. See `docs/agents/domain.md`.
 - Work lands on `staging`; `main` is release-only. Open PRs into `staging`, not `main`.
 - Merging `staging → main` cuts a release automatically: `.github/workflows/release.yml` derives the next version from conventional commits (git-cliff), builds + pushes the container image to GHCR, then tags `vX.Y.Z` and creates a GitHub release. The image build gates the release (build fails → no tag/release). So commit hygiene directly controls version bumps.
 - Keep the git-cliff flow; do not add release-please alongside it. See `RELEASING.md`.
-- CI (`.github/workflows/`): `check.yml` runs the web gates; `rust.yml` runs `scripts/check-rust` against a Postgres 18 service and fails when the generated web client types drift; `release.yml` builds + pushes the container image as part of cutting a release ; `preview.yml` builds a PR image when the `PREVIEW_DOMAIN` repo variable is set. Run `release.yml` via `workflow_dispatch` with `build_only=true` to rebuild the image without releasing.
+- CI runs locally: `scripts/ci` (Rust gate, web lint, format, typecheck, unit and component tests) must pass before anything merges into `staging`. GitHub Actions spends nothing by default: `ci.yml` is manual-only, and `release.yml` runs only when a release is cut on `main`. Do not add CI triggers without asking.
 
 ## Commit style
 

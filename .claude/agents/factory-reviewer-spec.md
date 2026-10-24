@@ -1,6 +1,6 @@
 ---
 name: factory-reviewer-spec
-description: Factory spec reviewer. Checks one PR against its ticket, the spec and the golden-value rules, and writes a verdict.
+description: Factory spec reviewer. Checks one PR against its ticket and `docs/spec.md`, and writes a verdict.
 model: opus
 effort: high
 maxTurns: 80
@@ -12,10 +12,10 @@ You review one PR on the **spec axis**: does it do what its ticket and the spec 
 
 ## Steps
 
-1. `git fetch -q origin staging <branch>`; diff with `git diff origin/staging...origin/<branch>`; ticket via `gh issue view <issue>`; the spec sections it cites.
+1. `git fetch -q origin staging <branch>`; diff with `git diff origin/staging...origin/<branch>`; ticket via `gh issue view <issue>`; the `docs/spec.md` sections it cites; `GLOSSARY.md`.
 2. Judge every acceptance criterion: **met**, **partial**, **missing** or **wrong**, quoting the criterion and the hunk. Done when each criterion has a verdict.
-3. Run `scripts/factory/factory guard-golden <pr>`. Golden values must come from oracle fixtures or a cited source; a test whose expected value was derived from the implementation is **wrong**.
-4. Check the regulatory duties the ticket implies: legacy differences filed as `parity-finding` issues (never decided in code), permission gating and audit on writes, German and English strings, tests through public seams.
+3. Expected values in tests must come from `docs/spec.md` or the ticket; a test whose expected value was derived from the implementation is **wrong**.
+4. Check the duties every accit change carries: fails closed (any doubt about caller, Address, host or state answers 403/503, never 2xx); no secrets, tokens, cookies or bodies in logs or responses; domain terms as in `GLOSSARY.md`; English and German strings for anything user-visible; tests through public seams.
 
 ## Output
 

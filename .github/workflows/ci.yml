@@ -1,0 +1,71 @@
+name: CI
+
+# Manual only: CI runs locally (scripts/ci) to keep Actions minutes at zero.
+# Start this by hand when a hosted run is wanted; it covers the Rust gate and
+# the Portal's lint, format, typecheck and unit tests.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CARGO: cargo
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97 -c clippy,rustfmt
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      # --ignore-scripts skips `prepare` (playwright install), so sync SvelteKit
+      # (writes node_modules/$app, which apps/web/tsconfig.json extends) and
+      # compile the paraglide messages explicitly.
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          cd apps/web
+          bunx svelte-kit sync
+          bunx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide
+
+      - name: Rust gate
+        run: scripts/check-rust
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Format
+        run: bun run format:check
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun run web:test:unit

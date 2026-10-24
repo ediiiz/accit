@@ -39,7 +39,7 @@ def check_push(args):
 def check(command):
     if re.search(r"--no-verify\b|core\.hooksPath|\bHUSKY=0\b", command):
         return "Hooks stay on: fix what the hook reports instead of skipping it."
-    if re.search(r"\bfj\s+pr\s+merge\b|/pulls/\d+/merge\b", command):
+    if re.search(r"\bgh\s+pr\s+merge\b|/pulls/\d+/merge\b", command):
         return "Merging goes through `scripts/factory/factory merge <pr>`, which checks CI first."
     if re.search(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(/|~|\$HOME)(\s|$)", command):
         return "Refusing to delete a root or home directory."
