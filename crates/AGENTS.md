@@ -4,10 +4,11 @@ One binary, `accit` (crate `server`): the Portal listener (embedded web build, `
 
 ## Crates
 
-Dependencies flow one way: `config ← server`.
+Dependencies flow one way: `access ← config ← server`.
 
 | Crate    | Holds                                                                                                      |
 | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `access` | The domain, without I/O: Address, Hostname (canonical parsing), and later Grants and the gate decision.    |
 | `config` | `/config/accit.yaml`: parsing and validation. Unknown keys are errors. No env reads beyond `ACCIT_CONFIG`. |
 | `server` | Listeners, routers (`portal.rs`, `verify.rs`), readiness, static site, CLI (`cli.rs`).                     |
 
