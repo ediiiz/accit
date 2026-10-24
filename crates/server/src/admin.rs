@@ -14,6 +14,10 @@ use tokio::signal::unix::{Signal, SignalKind, signal};
 
 use crate::verify::Verifier;
 
+mod grants;
+
+pub(crate) use grants::GrantCommand;
+
 const OWNER_ONLY: u32 = 0o600;
 const OWNER_ONLY_DIR: u32 = 0o700;
 const MAX_REQUEST: u64 = 4096;
@@ -73,7 +77,10 @@ struct Daemon {
 }
 
 impl Daemon {
-    fn answer(&self, request: &str) -> Result<String> {
+    async fn answer(&self, request: &str) -> Result<String> {
+        if let Some(command) = GrantCommand::parse(request)? {
+            return command.run(self.verifier.grants()).await;
+        }
         match request {
             "reload" => reload(&self.verifier, &self.config)
                 .map(|warning| format!("policy reloaded\n{}", warning.map(warning_line).unwrap_or_default())),
@@ -86,7 +93,7 @@ impl Daemon {
         let mut line = String::new();
         let mut reader = BufReader::new(read.take(MAX_REQUEST));
         let answer = match tokio::time::timeout(TIMEOUT, reader.read_line(&mut line)).await {
-            Ok(Ok(_)) => self.answer(line.trim_end()),
+            Ok(Ok(_)) => self.answer(line.trim_end()).await,
             _ => Err(anyhow::anyhow!("unreadable request")),
         };
         let encoded = match answer {

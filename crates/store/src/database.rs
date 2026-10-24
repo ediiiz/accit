@@ -78,6 +78,29 @@ pub(crate) async fn revoke(
     Ok(())
 }
 
+/// Unexpired Grants, each with its Revoke audit event; returns how many.
+pub(crate) async fn revoke_all(
+    connection: &mut SqliteConnection,
+    now: SystemTime,
+) -> Result<u64, StoreError> {
+    let (action, now) = (Action::Revoke.as_str(), to_millis(now)?);
+    let mut transaction = connection.begin().await?;
+
+    sqlx::query!(
+        "INSERT INTO audit_events (action, address, at) SELECT ?, address, ? FROM grants WHERE expires_at > ?",
+        action,
+        now,
+        now,
+    )
+    .execute(&mut *transaction)
+    .await?;
+    let deleted =
+        sqlx::query!("DELETE FROM grants WHERE expires_at > ?", now).execute(&mut *transaction).await?;
+    transaction.commit().await?;
+
+    Ok(deleted.rows_affected())
+}
+
 async fn record(
     connection: &mut SqliteConnection,
     action: Action,

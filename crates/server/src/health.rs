@@ -11,16 +11,27 @@ use tokio::time::Instant;
 
 const MAX_DRIFT: Duration = Duration::from_mins(5);
 
+#[derive(Debug, Default)]
+struct Flags {
+    up: AtomicBool,
+    /// Apart from `up`, so `accit admin recover` clears only this reason to be unready.
+    failed_closed: AtomicBool,
+}
+
 #[derive(Clone, Debug, Default)]
-pub struct Readiness(Arc<AtomicBool>);
+pub struct Readiness(Arc<Flags>);
 
 impl Readiness {
     pub fn set(&self, ready: bool) {
-        self.0.store(ready, Ordering::SeqCst);
+        self.0.up.store(ready, Ordering::SeqCst);
     }
 
     pub fn is_ready(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.up.load(Ordering::SeqCst) && !self.0.failed_closed.load(Ordering::SeqCst)
+    }
+
+    fn follow(&self, integrity: Integrity) {
+        self.0.failed_closed.store(integrity != Integrity::Sound, Ordering::SeqCst);
     }
 }
 
@@ -43,15 +54,13 @@ pub async fn guard_clocks(readiness: Readiness, wall: impl Fn() -> SystemTime, p
     }
 }
 
-/// Makes accit unready once the grant store fails closed. Returns why the process must stop: the
+/// Makes accit unready while the grant store is failed closed. Returns why the process must stop: the
 /// fail-closed marker could not be written, or the store is gone.
 pub async fn follow(readiness: Readiness, mut integrity: watch::Receiver<Integrity>) -> anyhow::Error {
     loop {
         let current = *integrity.borrow_and_update();
 
-        if current != Integrity::Sound {
-            readiness.set(false);
-        }
+        readiness.follow(current);
         if current == Integrity::Unrecoverable {
             return anyhow!("a Revoke was not saved and the fail-closed marker could not be written");
         }
@@ -70,7 +79,8 @@ pub async fn supervise(
     integrity: watch::Receiver<Integrity>,
     stop: impl Future<Output = ()>,
 ) -> anyhow::Result<()> {
-    readiness.set(*integrity.borrow() == Integrity::Sound);
+    readiness.follow(*integrity.borrow());
+    readiness.set(true);
 
     tokio::select! {
         result = servers => result,

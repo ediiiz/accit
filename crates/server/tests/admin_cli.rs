@@ -69,7 +69,11 @@ impl Daemon {
     }
 
     fn admin(&self, command: &str) -> Output {
-        accit().args(["admin", command]).env("ACCIT_CONFIG", self.config()).output().unwrap()
+        self.admin_with(&[command])
+    }
+
+    fn admin_with(&self, args: &[&str]) -> Output {
+        accit().arg("admin").args(args).env("ACCIT_CONFIG", self.config()).output().unwrap()
     }
 
     fn wait_for(&self, ready: impl Fn(&Self) -> bool) {
@@ -199,4 +203,56 @@ fn sighup_runs_the_same_reload() {
 
     daemon.wait_for(|daemon| daemon.log().contains("no host requires a Grant"));
     assert!(daemon.log().contains("policy reloaded"));
+}
+
+#[test]
+fn help_lists_the_grant_commands() {
+    let output = accit().arg("--help").output().unwrap();
+    let help = format!("{}{}", text(&output.stdout), text(&output.stderr));
+
+    for command in ["admin list", "admin revoke <address>", "admin revoke-all", "admin recover"] {
+        assert!(help.contains(command), "{command}: {help}");
+    }
+}
+
+#[test]
+fn grant_commands_reach_the_daemon() {
+    let daemon = Daemon::start();
+
+    let revoked = daemon.admin_with(&["revoke", "203.0.113.7"]);
+    assert!(revoked.status.success(), "{}", text(&revoked.stderr));
+    assert_eq!(text(&revoked.stdout), "revoked 203.0.113.7\n");
+
+    let listed = daemon.admin("list");
+    assert!(listed.status.success(), "{}", text(&listed.stderr));
+    assert_eq!(text(&listed.stdout), "");
+
+    let all = daemon.admin("revoke-all");
+    assert!(all.status.success(), "{}", text(&all.stderr));
+}
+
+/// Refused before the daemon is asked: no admin socket exists.
+#[test]
+fn malformed_grant_commands_are_usage_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    write_config(&dir, SELECTED);
+
+    for args in [
+        &["recover"][..],
+        &["recover", "--discard-grants", "--keep-grants"],
+        &["revoke", "203.0.113"],
+        &["revoke"],
+    ] {
+        let output = accit()
+            .arg("admin")
+            .args(args)
+            .env("ACCIT_CONFIG", dir.path().join("accit.yaml"))
+            .output()
+            .unwrap();
+        let error = text(&output.stderr);
+
+        assert!(!output.status.success(), "{args:?}");
+        assert!(error.contains("Usage"), "{args:?}: {error}");
+        assert!(!error.contains("connecting"), "{args:?}: {error}");
+    }
 }

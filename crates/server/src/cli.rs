@@ -4,18 +4,26 @@ use std::io::Write;
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use config::Config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::{admin, serve};
+use crate::admin::{self, GrantCommand};
+use crate::serve;
 
 const USAGE: &str = "Usage: accit [command]
 
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
   admin reload  Reload the Policy in the running daemon (as SIGHUP does).
+  admin list    Active Grants: Address and expiry.
+  admin revoke <address>
+                Revoke the Grant of one Address.
+  admin revoke-all
+                Revoke every Grant.
+  admin recover --discard-grants | --keep-grants
+                Leave the failed-closed state, deleting (recommended) or keeping the stored Grants.
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
@@ -49,16 +57,17 @@ async fn serve() -> Result<()> {
 
 /// Errors come back as the daemon's message and a non-zero exit.
 async fn admin(args: &[String]) -> Result<()> {
-    let command = match args {
-        [command] if command == "reload" => command,
-        _ => bail!("unknown admin command {args:?}\n\n{USAGE}"),
-    };
+    let command = args.join(" ");
+    let grant_command = GrantCommand::parse(&command).map_err(|error| anyhow!("{error:#}\n\n{USAGE}"))?;
+    if command != "reload" && grant_command.is_none() {
+        bail!("unknown admin command {args:?}\n\n{USAGE}");
+    }
     let path = config::path_from_env();
     let yaml = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let socket = config::admin_socket(&yaml)
         .with_context(|| format!("in {}", path.display()))?
         .with_context(|| format!("no admin_socket or database in {}", path.display()))?;
-    let answer = admin::request(&socket, command).await?;
+    let answer = admin::request(&socket, &command).await?;
 
     Ok(std::io::stdout().write_all(answer.as_bytes())?)
 }

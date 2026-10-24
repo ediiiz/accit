@@ -48,3 +48,30 @@ async fn an_unrecoverable_store_stops_with_an_error() {
     assert!(!readiness.is_ready());
     assert!(error.to_string().contains("marker"), "{error}");
 }
+
+#[tokio::test]
+async fn recovering_makes_accit_ready_again() {
+    let (readiness, (integrity, following)) = (ready(), watch::channel(Integrity::FailedClosed));
+    tokio::spawn(health::follow(readiness.clone(), following));
+    tokio::task::yield_now().await;
+    assert!(!readiness.is_ready());
+
+    integrity.send_replace(Integrity::Sound);
+    tokio::task::yield_now().await;
+
+    assert!(readiness.is_ready());
+}
+
+#[tokio::test]
+async fn recovering_leaves_accit_unready_for_another_reason() {
+    let (readiness, (integrity, following)) = (ready(), watch::channel(Integrity::FailedClosed));
+    tokio::spawn(health::follow(readiness.clone(), following));
+    tokio::task::yield_now().await;
+    // As the clock guard does after a wall-clock jump.
+    readiness.set(false);
+
+    integrity.send_replace(Integrity::Sound);
+    tokio::task::yield_now().await;
+
+    assert!(!readiness.is_ready());
+}

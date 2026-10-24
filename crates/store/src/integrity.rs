@@ -13,7 +13,7 @@ pub const FAIL_CLOSED_MARKER: &str = "fail-closed";
 const NOTE: &[u8] =
     b"A Revoke was not saved. Run `accit admin recover --discard-grants` or `--keep-grants`.\n";
 
-/// Ordered from best to worst; within one process it only gets worse.
+/// Ordered from best to worst; only `accit admin recover` makes it better.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Integrity {
     Sound,
@@ -47,6 +47,26 @@ impl Guard {
     /// Fails closed unless [`Unsaved::saved`] runs first.
     pub(crate) fn unsaved(&self) -> Unsaved<'_> {
         Unsaved(Some(self))
+    }
+
+    pub(crate) fn is_failed_closed(&self) -> bool {
+        *self.state.borrow() == Integrity::FailedClosed
+    }
+
+    /// Removes the marker, then reports [`Integrity::Sound`]; on error nothing changes.
+    pub(crate) fn recover(&self) -> io::Result<()> {
+        if let Some(marker) = self.marker.as_deref() {
+            remove(marker)?;
+        }
+        self.state.send_if_modified(|state| {
+            let recovering = *state == Integrity::FailedClosed;
+            if recovering {
+                *state = Integrity::Sound;
+            }
+            recovering
+        });
+
+        Ok(())
     }
 
     fn fail_closed(&self) {
@@ -95,7 +115,18 @@ fn write(path: &Path) -> io::Result<()> {
     file.write_all(NOTE)?;
     file.sync_all()?;
 
-    // The new directory entry must be durable too.
+    sync_directory(path)
+}
+
+fn remove(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => sync_directory(path),
+    }
+}
+
+/// Makes the creation or removal of `path`'s directory entry durable.
+fn sync_directory(path: &Path) -> io::Result<()> {
     let directory = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or(Path::new("."));
     File::open(directory)?.sync_all()
 }

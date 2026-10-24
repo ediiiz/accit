@@ -1,6 +1,7 @@
 //! Grants (`docs/spec.md` sections 6 and 7): an in-memory map that verification reads, kept in step
 //! with the database by one serialized mutation path.
 
+mod admin;
 mod audit;
 mod database;
 mod integrity;
@@ -18,6 +19,7 @@ use sqlx::SqliteConnection;
 use tokio::sync::{Mutex, watch};
 use tokio::time::Instant;
 
+pub use admin::{RecoverError, Recovery};
 pub use audit::{Action, AuditEvent};
 pub use integrity::{FAIL_CLOSED_MARKER, Integrity};
 
@@ -69,6 +71,11 @@ struct Grant {
 }
 
 impl Grant {
+    /// Its deadline counts from `loaded`, when `now` was read.
+    fn stored(expiry: SystemTime, now: SystemTime, loaded: Instant) -> Self {
+        Self { expiry, deadline: loaded + expiry.duration_since(now).unwrap_or_default() }
+    }
+
     fn valid(&self, now: SystemTime) -> bool {
         self.expiry > now && self.deadline > Instant::now()
     }
@@ -96,10 +103,7 @@ impl Grants {
         let active = database::unexpired(&mut connection, now)
             .await?
             .into_iter()
-            .map(|(address, expiry)| {
-                let remaining = expiry.duration_since(now).unwrap_or_default();
-                (address, Grant { expiry, deadline: loaded + remaining })
-            })
+            .map(|(address, expiry)| (address, Grant::stored(expiry, now, loaded)))
             .collect();
 
         let integrity = integrity::Guard::open(path);

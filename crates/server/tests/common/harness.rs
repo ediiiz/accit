@@ -165,20 +165,6 @@ impl Harness {
 
         self.send(request.body(Body::empty()).unwrap()).await
     }
-
-    /// Every operation on `table` (`INSERT`, `DELETE`) fails, as a broken disk would.
-    pub async fn fail(&self, operation: &str, table: &str) {
-        use sqlx::{Connection, SqliteConnection};
-
-        let mut connection =
-            SqliteConnection::connect(&format!("sqlite://{}", self.database.display())).await.unwrap();
-        let trigger = format!(
-            "CREATE TRIGGER fail_{operation}_{table} BEFORE {operation} ON {table}
-             BEGIN SELECT RAISE(ABORT, 'injected failure'); END"
-        );
-
-        sqlx::raw_sql(sqlx::AssertSqlSafe(trigger)).execute(&mut connection).await.unwrap();
-    }
 }
 
 pub type Headers = Vec<(String, String)>;
