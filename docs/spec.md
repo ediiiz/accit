@@ -100,7 +100,8 @@ For split-DNS setups where the app hostnames resolve to the server's LAN address
 | `POST /api/unlock`     | Create or renew the Grant of the requesting Address; returns committed state                                                              |
 | `POST /api/revoke`     | Revoke the Grant of the requesting Address; returns resulting state                                                                       |
 
-- Every answer from the three endpoints is one JSON object: `state`, `expiry` (`null` without a Grant) and `server_time` as Unix seconds, `address`, `family` (`ipv4` or `ipv6`), `apps` (`{name, url}`), `title`, `default_language` and `csrf_token`. Refusals have a plain status-text body: 400 (body not `{}`), 403, 409 (Unlock at the Grant cap), 413 (body over 1 KiB), 415, 429 (with `Retry-After` in seconds), 503.
+- Every successful answer (200) from the three endpoints is one JSON object: `state`, `expiry` (`null` without a Grant) and `server_time` as Unix seconds, `address`, `family` (`ipv4` or `ipv6`), `apps` (`{name, url}`), `title`, `default_language` and `csrf_token`. Refusals have a plain status-text body: 400 (body not `{}`), 403, 409 (Unlock at the Grant cap), 413 (body over 1 KiB), 415, 429 (with `Retry-After` in seconds), 503. An unknown `/api/*` path is 404 and a wrong method is 405.
+- With `profile: production`, every endpoint answers 403 for a non-public Address that is not in a Trusted network.
 - Every request must come from the pinned Traefik address with the correct proxy token and the exact Portal Host; otherwise 403.
 - POSTs: `application/json` only, bounded body, unknown fields rejected, exact `Origin` required, session-bound CSRF token.
 - Sessions exist only to carry the CSRF token: in memory, at most 10,000, oldest evicted first, 15 minutes, lost on restart. Cookie: `Secure`, `HttpOnly`, `SameSite=Strict`, host-only.

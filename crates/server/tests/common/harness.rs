@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use config::Config;
-use server::health::Readiness;
+use server::health::{self, Readiness};
 use server::portal::{self, Clock, Portal};
 use server::trust::ProxyTrust;
 use store::{Grants, Limits};
@@ -99,6 +99,7 @@ impl Harness {
         let grants = Grants::open(Some(&database), limits, t0()).await.unwrap();
         let readiness = Readiness::default();
         readiness.set(true);
+        tokio::spawn(health::follow(readiness.clone(), grants.integrity()));
         let seconds = Arc::new(AtomicU64::new(secs(t0())));
         let clock = Clock::new({
             let seconds = Arc::clone(&seconds);
@@ -116,6 +117,13 @@ impl Harness {
         assert!(BASE.contains(replace), "{replace}");
 
         Self::with(&BASE.replace(replace, with)).await
+    }
+
+    /// Lets the readiness follower react to what the store just reported.
+    pub async fn settle(&self) {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
     }
 
     pub fn now(&self) -> SystemTime {

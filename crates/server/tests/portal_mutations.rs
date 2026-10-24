@@ -109,7 +109,7 @@ async fn a_mutation_is_audited_with_the_requesting_address() {
 }
 
 #[tokio::test]
-async fn a_revoke_whose_write_fails_makes_accit_unready() {
+async fn a_revoke_whose_write_fails_leaves_the_portal_unavailable() {
     let harness = Harness::start().await;
     let mut browser = harness.browser();
     browser.mutate("/api/unlock").await;
@@ -118,6 +118,8 @@ async fn a_revoke_whose_write_fails_makes_accit_unready() {
     let reply = browser.mutate("/api/revoke").await;
 
     assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
+    harness.settle().await;
+    assert_eq!(browser.status().await.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(!harness.readiness.is_ready());
     assert_eq!(harness.grants.active_until(address(CLIENT), t0()), None);
 }

@@ -117,8 +117,7 @@ impl Portal {
     /// restart: fail closed until someone looks.
     async fn revoke_durably(&self, address: Address, now: SystemTime) -> Result<(), ApiError> {
         self.0.grants.revoke(address, now).await.map_err(|error| {
-            self.0.readiness.set(false);
-            tracing::error!(%error, "grant revoke was not written; not ready");
+            tracing::error!(%error, "grant revoke was not written");
 
             ApiError::Unavailable
         })
