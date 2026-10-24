@@ -1,4 +1,4 @@
-//! Fail-closed loading (docs/spec.md section 12): production needs its Portal and proxy trust settings.
+//! Fail-closed loading (docs/spec.md section 12): production needs its Portal, proxy trust and database settings.
 
 mod common;
 
@@ -9,6 +9,7 @@ profile: production
 public_origin: https://access.example.com
 trusted_proxy: 172.30.0.2
 proxy_token_file: /secrets/proxy-token
+database: /data/accit.db
 protection:
   mode: all
 ";
@@ -41,6 +42,11 @@ fn production_requires_trusted_proxy() {
 #[test]
 fn production_requires_proxy_token_file() {
     assert!(load(&without("proxy_token_file")).is_err());
+}
+
+#[test]
+fn production_requires_database() {
+    assert!(load(&without("database")).is_err());
 }
 
 #[test]

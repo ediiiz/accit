@@ -135,6 +135,7 @@ fn require_production_keys(raw: &Raw) -> Result<()> {
         ("public_origin", raw.public_origin.is_none()),
         ("trusted_proxy", raw.trusted_proxy.is_none()),
         ("proxy_token_file", raw.proxy_token_file.is_none()),
+        ("database", raw.database.is_none()),
     ];
 
     if let Some((key, _)) = missing.iter().find(|(_, absent)| *absent) {

@@ -86,28 +86,27 @@ impl Grants {
 
     /// Creates or renews the Grant to `now + grant_duration`; visible only once committed.
     pub async fn unlock(&self, address: Address, now: SystemTime) -> Result<SystemTime, UnlockError> {
-        let inner = Arc::clone(&self.0);
-
-        // Spawned, so a caller that goes away cannot cut a mutation in half.
-        tokio::spawn(async move { inner.unlock(address, now).await })
-            .await
-            .map_err(|_| StoreError::Interrupted)?
+        self.mutate(move |inner| async move { inner.unlock(address, now).await }).await
     }
 
     /// Removes the Grant from memory first, so it stops passing even if the write then fails.
     pub async fn revoke(&self, address: Address, now: SystemTime) -> Result<(), StoreError> {
-        let inner = Arc::clone(&self.0);
-
-        tokio::spawn(async move { inner.revoke(address, now).await })
-            .await
-            .map_err(|_| StoreError::Interrupted)?
+        self.mutate(move |inner| async move { inner.revoke(address, now).await }).await
     }
 
     /// Deletes Grants and audit events older than audit retention.
     pub async fn clean_up(&self, now: SystemTime) -> Result<(), StoreError> {
-        let inner = Arc::clone(&self.0);
+        self.mutate(move |inner| async move { inner.clean_up(now).await }).await
+    }
 
-        tokio::spawn(async move { inner.clean_up(now).await }).await.map_err(|_| StoreError::Interrupted)?
+    /// Spawned, so a caller that goes away cannot cut a mutation in half.
+    async fn mutate<T, E, F>(&self, mutation: impl FnOnce(Arc<Inner>) -> F) -> Result<T, E>
+    where
+        F: Future<Output = Result<T, E>> + Send + 'static,
+        T: Send + 'static,
+        E: From<StoreError> + Send + 'static,
+    {
+        tokio::spawn(mutation(Arc::clone(&self.0))).await.map_err(|_| StoreError::Interrupted)?
     }
 
     pub async fn status(&self, address: Address, now: SystemTime) -> Result<GrantStatus, StoreError> {
