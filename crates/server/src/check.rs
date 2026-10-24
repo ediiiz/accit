@@ -6,7 +6,7 @@ use std::fmt::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use access::Hostname;
+use access::{Gate, Hostname, Policy};
 use anyhow::{Context, Result};
 use config::Config;
 
@@ -22,9 +22,15 @@ pub struct Report {
     pub failed: bool,
 }
 
-/// What the gate does without a Grant: the Portal host passes (spec section 3 step 4).
+/// What the gate does without a Grant, as `verify` decides it.
 fn is_gated(config: &Config, host: &Hostname) -> bool {
-    config.portal_host.as_ref() != Some(host) && config.protection.is_gated(host)
+    Gate {
+        policy: &config.protection,
+        trusted: &config.trusted_networks,
+        portal_host: config.portal_host.as_ref(),
+        public_only: false,
+    }
+    .is_gated(host)
 }
 
 /// Every host the config names: the Policy's list, app links and the Portal.
@@ -46,6 +52,10 @@ fn coverage(config: &Config) -> String {
 
     for host in known_hosts(config) {
         let _ = writeln!(text, "{host}  {}", state(is_gated(config, host)));
+    }
+
+    if matches!(config.protection, Policy::All { .. }) {
+        let _ = writeln!(text, "other hosts  gated");
     }
 
     text

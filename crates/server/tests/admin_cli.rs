@@ -111,22 +111,34 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Where an operator reads it: stdout, not a log line.
 #[test]
-fn help_lists_admin_reload() {
+fn help_lists_the_whole_admin_command_set_on_stdout() {
     let output = accit().arg("--help").output().unwrap();
-    let help = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    let help = text(&output.stdout);
 
     assert!(output.status.success());
-    assert!(help.contains("admin reload"), "{help}");
+    assert_eq!(text(&output.stderr), "");
+    for command in [
+        "admin reload",
+        "admin list",
+        "admin revoke <address>",
+        "admin revoke-all",
+        "admin recover --discard-grants | --keep-grants",
+        "admin status",
+        "admin check [file]",
+    ] {
+        assert!(help.contains(command), "{command}: {help}");
+    }
 }
 
 #[test]
-fn help_lists_admin_status() {
+fn help_warns_that_keeping_grants_may_restore_one_whose_revoke_failed() {
     let output = accit().arg("--help").output().unwrap();
-    let help = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    let help = text(&output.stdout);
 
-    assert!(output.status.success());
-    assert!(help.contains("admin status"), "{help}");
+    assert!(help.contains("--keep-grants"), "{help}");
+    assert!(help.contains("whose Revoke failed"), "{help}");
 }
 
 #[test]
@@ -136,7 +148,10 @@ fn admin_status_prints_the_daemons_counters() {
     let status = daemon.admin("status");
 
     assert!(status.status.success(), "{}", text(&status.stderr));
-    assert_eq!(text(&status.stdout), "active grants: 0\nverifications per minute: 0\ndenials: 0\n");
+    assert_eq!(
+        text(&status.stdout),
+        "active grants: 0\nverifications per minute: 0\ndenials since start: 0\n"
+    );
 }
 
 #[test]
@@ -222,16 +237,6 @@ fn sighup_runs_the_same_reload() {
 
     daemon.wait_for(|daemon| daemon.log().contains("no host requires a Grant"));
     assert!(daemon.log().contains("policy reloaded"));
-}
-
-#[test]
-fn help_lists_the_grant_commands() {
-    let output = accit().arg("--help").output().unwrap();
-    let help = format!("{}{}", text(&output.stdout), text(&output.stderr));
-
-    for command in ["admin list", "admin revoke <address>", "admin revoke-all", "admin recover"] {
-        assert!(help.contains(command), "{command}: {help}");
-    }
 }
 
 #[test]

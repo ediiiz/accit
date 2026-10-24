@@ -1,15 +1,47 @@
 //! The built Portal (`apps/web/build`), embedded in release builds, read from disk in debug.
 //! Prerendered, so only exact files and directory indexes exist; everything else is 404.
 
+use std::borrow::Cow;
+use std::fmt;
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
 
+use crate::portal::InlineScripts;
+
 #[derive(Embed)]
 #[folder = "../../apps/web/build"]
 #[allow_missing = true]
-struct Site;
+struct Embedded;
+
+type Lookup = Arc<dyn Fn(&str) -> Option<Cow<'static, [u8]>> + Send + Sync>;
+
+/// Where the built files come from: the embedded build, or a stand-in in tests.
+#[derive(Clone)]
+pub struct Files(Lookup);
+
+impl Files {
+    pub fn new(lookup: impl Fn(&str) -> Option<Cow<'static, [u8]>> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(lookup))
+    }
+
+    pub(crate) fn embedded() -> Self {
+        Self::new(|path| Embedded::get(path).map(|file| file.data))
+    }
+
+    fn get(&self, path: &str) -> Option<Cow<'static, [u8]>> {
+        (self.0)(path)
+    }
+}
+
+impl fmt::Debug for Files {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Files")
+    }
+}
 
 fn cache_control(path: &str) -> &'static str {
     // Content-hashed by Vite: a new build gets new names.
@@ -41,7 +73,7 @@ fn resolve(path: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
 }
 
 /// Precompressed siblings (`x.br`, `x.gz`) from adapter-static, when the client accepts them.
-fn encoded(path: &str, headers: &HeaderMap) -> Option<(&'static str, rust_embed::EmbeddedFile)> {
+fn encoded(files: &Files, path: &str, headers: &HeaderMap) -> Option<(&'static str, Cow<'static, [u8]>)> {
     let accepted =
         headers.get(header::ACCEPT_ENCODING).and_then(|value| value.to_str().ok()).unwrap_or_default();
     let accepts = |name: &str| accepted.split(',').any(|entry| entry.trim().split(';').next() == Some(name));
@@ -49,22 +81,30 @@ fn encoded(path: &str, headers: &HeaderMap) -> Option<(&'static str, rust_embed:
     [("br", "br"), ("gzip", "gz")]
         .into_iter()
         .filter(|(name, _)| accepts(name))
-        .find_map(|(name, extension)| Site::get(&format!("{path}.{extension}")).map(|file| (name, file)))
+        .find_map(|(name, extension)| files.get(&format!("{path}.{extension}")).map(|file| (name, file)))
 }
 
-pub async fn serve(uri: Uri, headers: HeaderMap) -> Response {
+pub fn serve(files: &Files, uri: &Uri, headers: &HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
-    let Some((route, file)) = resolve(path, |file| Site::get(file).is_some())
-        .and_then(|route| Site::get(&route).map(|file| (route, file)))
+    let Some((route, file)) = resolve(path, |file| files.get(file).is_some())
+        .and_then(|route| files.get(&route).map(|file| (route, file)))
     else {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     };
     let mime = mime_type(&route);
-    let (encoding, body) = match encoded(&route, &headers) {
-        Some((encoding, file)) => (Some(encoding), file.data),
-        None => (None, file.data),
+    let scripts = (extension(&route) == "html")
+        .then(|| std::str::from_utf8(&file).map(InlineScripts::of).ok())
+        .flatten();
+    let (encoding, body) = match encoded(files, &route, headers) {
+        Some((encoding, body)) => (Some(encoding), body),
+        None => (None, file),
     };
     let mut response = Response::new(Body::from(body.into_owned()));
+
+    if let Some(scripts) = scripts {
+        response.extensions_mut().insert(scripts);
+    }
+
     let response_headers = response.headers_mut();
 
     response_headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));

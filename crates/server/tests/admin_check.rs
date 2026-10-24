@@ -50,6 +50,22 @@ protection:
 }
 
 #[test]
+fn all_mode_adds_a_row_for_every_other_host() {
+    let report = check_config("profile: test\nprotection:\n  mode: all\n").unwrap();
+
+    assert!(report.text.lines().any(|line| line == "other hosts  gated"), "{}", report.text);
+}
+
+#[test]
+fn selected_mode_has_no_row_for_other_hosts() {
+    let report =
+        check_config("profile: test\nprotection:\n  mode: selected\n  hosts: [jellyfin.example.com]\n")
+            .unwrap();
+
+    assert!(!report.text.contains("other hosts"), "{}", report.text);
+}
+
+#[test]
 fn selected_mode_lists_its_hosts_as_gated_and_other_app_hosts_as_open() {
     let report = check_config(
         "profile: test

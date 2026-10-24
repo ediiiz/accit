@@ -115,19 +115,19 @@ Verification listener (8081): `/verify`, `/healthz` (liveness), `/readyz` (stora
 
 One prerendered SvelteKit route, Paraglide (English, German; browser language, admin default), Tailwind, and only the components the screen needs. Initial HTML, CSS and JS under 150 KiB compressed, enforced in CI. No service worker, analytics, third-party fonts or CDNs.
 
-| State               | Content                                                                | Primary action        |
-| ------------------- | ---------------------------------------------------------------------- | --------------------- |
-| Not enabled         | "Access your apps." "Enable access for your current connection."       | Enable access         |
-| Submitting          | "Enabling access…"                                                     | Disabled, in progress |
-| Enabled             | "Access is enabled." "Available until [localized date/time]."          | Extend access         |
-| Expired             | "Your access has expired."                                             | Enable access         |
-| Connection changed  | "Your connection changed. Enable access again."                        | Enable access         |
-| Home network        | "You're on your home network. Your apps work without enabling access." | none                  |
-| Service unavailable | "We couldn't enable access. Please try again."                         | Try again             |
-| Rate limited        | "Please wait a moment before trying again."                            | Retry after countdown |
+| State               | Content                                                                                         | Primary action        |
+| ------------------- | ----------------------------------------------------------------------------------------------- | --------------------- |
+| Not enabled         | "Access your apps." "Enable access for your current connection."                                | Enable access         |
+| Submitting          | "Enabling access…"                                                                              | Disabled, in progress |
+| Enabled             | "Access is enabled." "Available until [localized date/time, including timezone]." **(changed)** | Extend access         |
+| Expired             | "Your access has expired."                                                                      | Enable access         |
+| Connection changed  | "Your connection changed. Enable access again."                                                 | Enable access         |
+| Home network        | "You're on your home network. Your apps work without enabling access."                          | none                  |
+| Service unavailable | "We couldn't enable access. Please try again."                                                  | Try again             |
+| Rate limited        | "Please wait a moment before trying again."                                                     | Retry after countdown |
 
 - "Connection changed": the Portal stores the Address of its last successful Unlock in `localStorage` and compares it with the status Address.
-- Secondary action "Disable access for this connection", with confirmation.
+- Secondary action "Disable access for this connection", with confirmation. If it fails, Service unavailable reads "We couldn't disable access. Please try again." **(changed)**
 - Tip: "To enable another device, connect this phone to the same Wi-Fi."
 - Troubleshooting panel: current Address and family.
 - Title configurable, default "Access".
@@ -152,10 +152,10 @@ One prerendered SvelteKit route, Paraglide (English, German; browser language, a
 `accit admin <command>`, run in the container, talks to the daemon over a Unix socket (owner-only permissions, never exposed through Traefik):
 
 - `list`, `revoke <address>`, `revoke-all`
-- `check [file]`: validate a config without applying it; dry-run coverage table; client CA expiry; empty-selection and link warnings
+- `check [file]`: validate a config without applying it; dry-run coverage table; client CA expiry; empty-selection and link warnings. Runs locally in the CLI process, not over the socket
 - `reload`
-- `status`: counts of active Grants, verifications per minute, denials
-- `recover --discard-grants | --keep-grants`
+- `status`: counts of active Grants, verifications per minute, denials since start
+- `recover --discard-grants | --keep-grants` (`--keep-grants` may restore a Grant whose Revoke failed)
 
 Client CA and shared bundle: `scripts/client-ca` on the admin's machine creates the dedicated CA, a one-year shared leaf and the password-protected `.p12`, and handles rotation (new CA). The CA private key never enters the image or container. accit reads only the public trust file and warns from 30 days before expiry.
 

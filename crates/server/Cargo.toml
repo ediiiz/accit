@@ -18,6 +18,7 @@ config.workspace = true
 store.workspace = true
 anyhow.workspace = true
 axum.workspace = true
+base64.workspace = true
 getrandom.workspace = true
 httpdate.workspace = true
 rust-embed.workspace = true
