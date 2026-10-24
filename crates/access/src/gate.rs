@@ -28,6 +28,12 @@ fn exactly_one<'v>(values: impl IntoIterator<Item = &'v [u8]>) -> Option<&'v [u8
 }
 
 impl Gate<'_> {
+    /// Whether `host` needs a Grant from an Address outside the Trusted networks: not the Portal host
+    /// (step 4) and not open under the Policy (step 6).
+    pub fn is_gated(&self, host: &Hostname) -> bool {
+        self.portal_host != Some(host) && self.policy.is_gated(host)
+    }
+
     /// `forwarded_for` and `forwarded_host`: every value of the request's header.
     /// `has_grant` is asked only when the decision depends on it.
     pub fn decide<'v>(
@@ -48,11 +54,7 @@ impl Gate<'_> {
             return Verdict::Deny;
         };
 
-        if self.portal_host == Some(&host)
-            || self.trusted.contains(address)
-            || !self.policy.is_gated(&host)
-            || has_grant(address)
-        {
+        if self.trusted.contains(address) || !self.is_gated(&host) || has_grant(address) {
             return Verdict::Pass;
         }
 

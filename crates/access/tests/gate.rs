@@ -237,3 +237,15 @@ fn step_5_a_public_ipv6_source_inside_the_home_still_needs_a_grant() {
     assert_eq!(without, Verdict::Deny);
     assert_eq!(with, Verdict::Pass);
 }
+
+#[test]
+fn a_host_is_gated_unless_it_is_the_portal_or_open_under_the_policy() {
+    let policy = selected(&["jellyfin.example.com", PORTAL]);
+    let portal = host(PORTAL);
+    let trusted = TrustedNetworks::default();
+    let gate = Gate { policy: &policy, trusted: &trusted, portal_host: Some(&portal), public_only: true };
+
+    assert!(gate.is_gated(&host("jellyfin.example.com")));
+    assert!(!gate.is_gated(&host("photos.example.com")));
+    assert!(!gate.is_gated(&host(PORTAL)));
+}

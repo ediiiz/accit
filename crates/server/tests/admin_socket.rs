@@ -176,7 +176,7 @@ async fn status_reports_grants_verifications_per_minute_and_denials() {
 
     let output = admin::request(&daemon.socket(), "status").await.unwrap();
 
-    assert_eq!(output, "active grants: 2\nverifications per minute: 4\ndenials: 2\n");
+    assert_eq!(output, "active grants: 2\nverifications per minute: 4\ndenials since start: 2\n");
 }
 
 #[tokio::test]
@@ -185,7 +185,7 @@ async fn status_before_any_verification_is_all_zero() {
 
     let output = admin::request(&daemon.socket(), "status").await.unwrap();
 
-    assert_eq!(output, "active grants: 0\nverifications per minute: 0\ndenials: 0\n");
+    assert_eq!(output, "active grants: 0\nverifications per minute: 0\ndenials since start: 0\n");
 }
 
 #[tokio::test]
@@ -204,5 +204,5 @@ async fn status_never_shows_an_address() {
     }
     let labels: Vec<&str> =
         output.lines().filter_map(|line| line.split_once(':')).map(|(label, _)| label).collect();
-    assert_eq!(labels, ["active grants", "verifications per minute", "denials"]);
+    assert_eq!(labels, ["active grants", "verifications per minute", "denials since start"]);
 }
