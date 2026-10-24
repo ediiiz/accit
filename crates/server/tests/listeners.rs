@@ -61,7 +61,7 @@ async fn portal_listener_does_not_answer_verification_paths() {
     let headers = [(TOKEN_HEADER, TOKEN), ("host", common::PORTAL_HOST)];
 
     for path in ["/verify", "/healthz", "/readyz", "/api/unknown"] {
-        let call = send(portal_router(production()), Some(PROXY), path, &headers).await;
+        let call = send(portal_router(production()).await, Some(PROXY), path, &headers).await;
 
         assert_eq!(call.status, StatusCode::NOT_FOUND, "{path}");
     }

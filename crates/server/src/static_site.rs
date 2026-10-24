@@ -17,8 +17,12 @@ fn cache_control(path: &str) -> &'static str {
         return "public, max-age=31536000, immutable";
     }
 
-    // Revalidated, so a deploy reaches open tabs.
-    if extension(path) == "html" || path == "_app/version.json" {
+    // Pages are never stored (spec section 8); the version file is revalidated, so a deploy reaches open tabs.
+    if extension(path) == "html" {
+        return "no-store";
+    }
+
+    if path == "_app/version.json" {
         return "no-cache";
     }
 
@@ -125,9 +129,9 @@ mod tests {
     }
 
     #[test]
-    fn hashed_assets_are_immutable_and_pages_revalidate() {
+    fn hashed_assets_are_immutable_and_pages_are_never_stored() {
         assert_eq!(cache_control("_app/immutable/app.js"), "public, max-age=31536000, immutable");
-        assert_eq!(cache_control("index.html"), "no-cache");
+        assert_eq!(cache_control("index.html"), "no-store");
         assert_eq!(cache_control("_app/version.json"), "no-cache");
         assert_eq!(cache_control("favicon.png"), "public, max-age=3600");
     }

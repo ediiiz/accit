@@ -13,7 +13,10 @@ use config::Config;
 use server::health::Readiness;
 use server::trust::ProxyTrust;
 use server::{portal, verify};
+use store::{Grants, Limits};
 use tower::ServiceExt;
+
+pub mod harness;
 
 pub const PROXY: &str = "172.30.0.2";
 pub const TOKEN: &str = "s3cr3t-proxy-token-value";
@@ -46,8 +49,19 @@ pub fn verify_router(trust: ProxyTrust) -> Router {
     verify::router(readiness, trust)
 }
 
-pub fn portal_router(trust: ProxyTrust) -> Router {
-    portal::router(trust)
+/// A Portal over an empty in-memory store, ready.
+pub async fn portal_router(trust: ProxyTrust) -> Router {
+    let config = Config::parse(PRODUCTION, |_| Ok(TOKEN.to_owned())).unwrap();
+    let limits = Limits {
+        grant_duration: config.grant_duration,
+        max_grants: config.max_grants,
+        audit_retention: config.audit_retention,
+    };
+    let grants = Grants::open(None, limits, std::time::SystemTime::now()).await.unwrap();
+    let readiness = Readiness::default();
+    readiness.set(true);
+
+    portal::router(trust, portal::Portal::new(&config, grants, readiness, portal::Clock::system()))
 }
 
 pub struct Call {

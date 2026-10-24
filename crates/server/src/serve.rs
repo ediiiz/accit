@@ -11,8 +11,9 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 
 use crate::health::Readiness;
+use crate::portal::{self, Clock, Portal};
 use crate::trust::ProxyTrust;
-use crate::{portal, verify};
+use crate::verify;
 
 const DRAIN: Duration = Duration::from_secs(10);
 const CLEANUP: Duration = Duration::from_hours(1);
@@ -45,13 +46,13 @@ async fn serve(listener: TcpListener, app: Router, stop: watch::Receiver<bool>) 
 async fn serve_both(
     portal_listener: TcpListener,
     verify_listener: TcpListener,
-    readiness: Readiness,
-    trust: ProxyTrust,
+    portal_app: Router,
+    verify_app: Router,
     stop: watch::Receiver<bool>,
 ) -> Result<()> {
     tokio::try_join!(
-        serve(portal_listener, portal::router(trust.clone()), stop.clone()),
-        serve(verify_listener, verify::router(readiness, trust), stop),
+        serve(portal_listener, portal_app, stop.clone()),
+        serve(verify_listener, verify_app, stop),
     )?;
 
     Ok(())
@@ -99,12 +100,16 @@ pub async fn run(config: Config) -> Result<()> {
     // Before serving, so no request sees readiness without the Grants behind it.
     let grants = open_grants(&config).await?;
     readiness.set(true);
-    tokio::spawn(grants.clean_up_every(CLEANUP));
+    tokio::spawn(grants.clone().clean_up_every(CLEANUP));
 
     trust.log_startup();
 
+    let portal_app =
+        portal::router(trust.clone(), Portal::new(&config, grants, readiness.clone(), Clock::system()));
+    let verify_app = verify::router(readiness, trust);
+
     tokio::select! {
-        result = serve_both(portal_listener, verify_listener, readiness, trust, stopping) => result,
+        result = serve_both(portal_listener, verify_listener, portal_app, verify_app, stopping) => result,
         () = drain_after_signal(stop) => Ok(()),
     }
 }

@@ -48,6 +48,7 @@ fn app_links_need_a_parsable_host() {
         "'https://user@a.example.com'",
         "'https://10.0.0.1/'",
         "'https://a.example.com:99999'",
+        "'https://a.example.com:0'",
     ] {
         assert!(with(&app(url)).is_err(), "{url}");
     }
