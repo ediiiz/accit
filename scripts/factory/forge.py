@@ -112,7 +112,7 @@ class Forge:
 
     def merge(self, pr, title):
         pr_obj = self.call("GET", f"/pulls/{pr}")
-        self.call("PUT", f"/pulls/{pr}/merge", {"merge_method": "merge", "commit_title": title})
+        self.call("PUT", f"/pulls/{pr}/merge", {"merge_method": "squash", "commit_title": f"{title} (#{pr})"})
         branch = urllib.parse.quote(pr_obj["head"]["ref"], safe="")
         self.call("DELETE", f"/git/refs/heads/{branch}")
 
