@@ -9,7 +9,10 @@ cd "$root"
 step() { printf '\n== %s\n' "$1"; }
 
 step "web: sync"
+# Generated and gitignored, so a fresh worktree has neither: SvelteKit's
+# node_modules/$app and the Paraglide messages.
 bun run --cwd apps/web prebuild >/dev/null
+(cd apps/web && bunx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide >/dev/null)
 step "rust gate"
 scripts/check-rust
 step "lint"
