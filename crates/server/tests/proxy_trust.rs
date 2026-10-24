@@ -5,7 +5,7 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{
-    PORTAL_HOST, PROXY, TOKEN, TOKEN_HEADER, portal_router, production, send, trust, verify_router,
+    PORTAL_HOST, PROXY, TOKEN, TOKEN_HEADER, portal_router, production, send, trust, verifier, verify_router,
 };
 use server::health::Readiness;
 use server::verify;
@@ -16,7 +16,7 @@ const TEST_PROFILE: &str = "profile: test\nprotection:\n  mode: selected\n";
 
 /// `/readyz` is 200 once ready, so anything else is the gate saying no.
 async fn verify_status(peer: Option<&str>, path: &str, headers: &[(&str, &str)]) -> StatusCode {
-    send(verify_router(production()), peer, path, headers).await.status
+    send(verify_router(production()).await, peer, path, headers).await.status
 }
 
 /// The Portal answers 404 for unknown paths, so anything else is the gate saying no.
@@ -40,7 +40,7 @@ async fn the_ipv4_mapped_form_of_the_proxy_address_passes() {
 async fn other_peers_are_forbidden_on_every_verification_path() {
     for peer in ["172.30.0.3", "10.0.0.1", "127.0.0.1", "203.0.113.9", "2001:db8::2", "::ffff:172.30.0.3"] {
         for path in ["/verify", "/readyz", "/nope"] {
-            let call = send(verify_router(production()), Some(peer), path, &FROM_PROXY).await;
+            let call = send(verify_router(production()).await, Some(peer), path, &FROM_PROXY).await;
 
             assert_eq!(call.status, StatusCode::FORBIDDEN, "{peer} {path}");
             assert_eq!(call.body, "Forbidden", "{peer} {path}");
@@ -79,7 +79,7 @@ async fn a_missing_or_wrong_token_is_forbidden() {
 
 #[tokio::test]
 async fn not_ready_answers_503_before_the_peer_is_checked() {
-    let app = verify::router(Readiness::default(), production());
+    let app = verify::router(Readiness::default(), production(), verifier().await);
     let call = send(app, Some("203.0.113.9"), "/verify", &[]).await;
 
     assert_eq!(call.status, StatusCode::SERVICE_UNAVAILABLE);
@@ -180,12 +180,12 @@ async fn the_portal_forbids_every_path_to_other_peers() {
 
 #[tokio::test]
 async fn the_test_profile_without_a_pinned_proxy_trusts_loopback_only() {
-    let app = || verify_router(trust(TEST_PROFILE));
+    let app = async || verify_router(trust(TEST_PROFILE)).await;
 
-    assert_eq!(send(app(), Some("127.0.0.1"), "/readyz", &[]).await.status, StatusCode::OK);
-    assert_eq!(send(app(), Some("::1"), "/readyz", &[]).await.status, StatusCode::OK);
-    assert_eq!(send(app(), Some("172.30.0.2"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
-    assert_eq!(send(app(), None, "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send(app().await, Some("127.0.0.1"), "/readyz", &[]).await.status, StatusCode::OK);
+    assert_eq!(send(app().await, Some("::1"), "/readyz", &[]).await.status, StatusCode::OK);
+    assert_eq!(send(app().await, Some("172.30.0.2"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send(app().await, None, "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -201,11 +201,11 @@ async fn the_test_profile_portal_accepts_loopback_without_a_host_to_match() {
 #[tokio::test]
 async fn the_test_profile_still_enforces_what_is_configured() {
     let pinned = format!("{TEST_PROFILE}trusted_proxy: {PROXY}\nproxy_token_file: /t\n");
-    let app = || verify_router(trust(&pinned));
+    let app = async || verify_router(trust(&pinned)).await;
 
-    assert_eq!(send(app(), Some("127.0.0.1"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
-    assert_eq!(send(app(), Some(PROXY), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
-    assert_eq!(send(app(), Some(PROXY), "/readyz", &FROM_PROXY).await.status, StatusCode::OK);
+    assert_eq!(send(app().await, Some("127.0.0.1"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send(app().await, Some(PROXY), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send(app().await, Some(PROXY), "/readyz", &FROM_PROXY).await.status, StatusCode::OK);
 }
 
 #[tokio::test]
