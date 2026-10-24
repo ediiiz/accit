@@ -7,6 +7,7 @@ mod listen;
 mod origin;
 mod protection;
 mod token;
+mod trusted;
 
 use std::path::PathBuf;
 

@@ -1,10 +1,12 @@
-//! `protection:` into an [`access::Policy`] (docs/spec.md section 4).
+//! `protection:` into an [`access::Policy`] and [`access::TrustedNetworks`] (docs/spec.md sections 4 and 5).
 
 use std::collections::BTreeSet;
 
-use access::{Hostname, Policy};
+use access::{Cidr, Hostname, Policy, TrustedNetworks};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Deserializer};
+
+use crate::trusted;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -22,6 +24,10 @@ pub(crate) struct RawProtection {
     hosts: Key,
     #[serde(default)]
     excluded_hosts: Key,
+    #[serde(default)]
+    trusted_networks: Option<Vec<String>>,
+    #[serde(default)]
+    trusted_networks_exclude: Option<Vec<String>>,
 }
 
 /// A list key as written; `Null` (`hosts:`) is kept apart from `Absent` so the wrong mode can reject it.
@@ -56,7 +62,11 @@ fn hostnames(key: &str, entries: &[String]) -> Result<BTreeSet<Hostname>> {
 }
 
 impl RawProtection {
-    pub(crate) fn validate(self, portal_host: Option<&Hostname>) -> Result<Policy> {
+    pub(crate) fn validate(
+        self,
+        portal_host: Option<&Hostname>,
+        docker_networks: &[Cidr],
+    ) -> Result<(Policy, TrustedNetworks)> {
         let policy = match (self.mode, &self.hosts, &self.excluded_hosts) {
             (Mode::Selected, hosts, Key::Absent) => {
                 Policy::Selected { hosts: hostnames("hosts", hosts.entries())? }
@@ -72,6 +82,12 @@ impl RawProtection {
             bail!("the Portal host `{portal}` may not appear in protection");
         }
 
-        Ok(policy)
+        let trusted = trusted::networks(
+            self.trusted_networks.as_deref().unwrap_or_default(),
+            self.trusted_networks_exclude.as_deref().unwrap_or_default(),
+            docker_networks,
+        )?;
+
+        Ok((policy, trusted))
     }
 }
