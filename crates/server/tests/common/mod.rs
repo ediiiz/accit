@@ -18,6 +18,8 @@ use server::{portal, verify};
 use store::{Grants, Limits};
 use tower::ServiceExt;
 
+pub mod harness;
+
 pub const PROXY: &str = "172.30.0.2";
 pub const TOKEN: &str = "s3cr3t-proxy-token-value";
 pub const PORTAL_HOST: &str = "access.example.com";
@@ -71,8 +73,11 @@ pub async fn verify_router(trust: ProxyTrust) -> Router {
     verify::router(ready(), trust, verifier().await)
 }
 
-pub fn portal_router(trust: ProxyTrust) -> Router {
-    portal::router(trust)
+/// A Portal over an empty in-memory store, ready.
+pub async fn portal_router(trust: ProxyTrust) -> Router {
+    let portal = portal::Portal::new(&config(PRODUCTION), grants().await, ready(), portal::Clock::system());
+
+    portal::router(trust, portal)
 }
 
 pub struct Call {

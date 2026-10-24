@@ -21,7 +21,7 @@ async fn verify_status(peer: Option<&str>, path: &str, headers: &[(&str, &str)])
 
 /// The Portal answers 404 for unknown paths, so anything else is the gate saying no.
 async fn portal_status(peer: Option<&str>, headers: &[(&str, &str)]) -> StatusCode {
-    send(portal_router(production()), peer, "/api/unknown", headers).await.status
+    send(portal_router(production()).await, peer, "/api/unknown", headers).await.status
 }
 
 #[tokio::test]
@@ -171,7 +171,7 @@ async fn the_portal_host_is_compared_canonically() {
 #[tokio::test]
 async fn the_portal_forbids_every_path_to_other_peers() {
     for path in ["/", "/api/status", "/verify", "/healthz", "/_app/x.js"] {
-        let call = send(portal_router(production()), Some("127.0.0.1"), path, &PORTAL_REQUEST).await;
+        let call = send(portal_router(production()).await, Some("127.0.0.1"), path, &PORTAL_REQUEST).await;
 
         assert_eq!(call.status, StatusCode::FORBIDDEN, "{path}");
         assert_eq!(call.body, "Forbidden", "{path}");
@@ -190,7 +190,7 @@ async fn the_test_profile_without_a_pinned_proxy_trusts_loopback_only() {
 
 #[tokio::test]
 async fn the_test_profile_portal_accepts_loopback_without_a_host_to_match() {
-    let app = portal_router(trust(TEST_PROFILE));
+    let app = portal_router(trust(TEST_PROFILE)).await;
 
     assert_eq!(
         send(app, Some("127.0.0.1"), "/api/x", &[("host", "localhost:5173")]).await.status,
@@ -214,11 +214,11 @@ async fn the_test_profile_portal_enforces_a_configured_host() {
     let app = || portal_router(trust(&configured));
 
     assert_eq!(
-        send(app(), Some("127.0.0.1"), "/api/x", &[("host", "evil.com")]).await.status,
+        send(app().await, Some("127.0.0.1"), "/api/x", &[("host", "evil.com")]).await.status,
         StatusCode::FORBIDDEN
     );
     assert_eq!(
-        send(app(), Some("127.0.0.1"), "/api/x", &[("host", PORTAL_HOST)]).await.status,
+        send(app().await, Some("127.0.0.1"), "/api/x", &[("host", PORTAL_HOST)]).await.status,
         StatusCode::NOT_FOUND
     );
 }
@@ -229,11 +229,11 @@ async fn the_portal_host_may_come_from_the_request_authority() {
     let own = format!("https://{PORTAL_HOST}/api/x");
 
     assert_eq!(
-        send(portal_router(production()), Some(PROXY), &own, &headers).await.status,
+        send(portal_router(production()).await, Some(PROXY), &own, &headers).await.status,
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        send(portal_router(production()), Some(PROXY), "https://evil.com/api/x", &headers).await.status,
+        send(portal_router(production()).await, Some(PROXY), "https://evil.com/api/x", &headers).await.status,
         StatusCode::FORBIDDEN
     );
 }
