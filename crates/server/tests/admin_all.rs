@@ -181,14 +181,16 @@ fn revoke_one_then_all(daemon: &Daemon) {
 }
 
 fn reload_and_check(daemon: &Daemon) {
-    let candidate = daemon.dir.path().join("candidate.yaml");
     let verify = daemon.verify;
-    std::fs::write(&candidate, config(daemon.dir.path(), verify, "  mode: all\n")).unwrap();
-    let report = daemon.run(&["check", &candidate.display().to_string()]);
-    assert!(report.contains("other hosts  gated"), "{report}");
-    assert_eq!(daemon.verify(UNKNOWN), 403, "check applies nothing");
+    assert!(daemon.run(&["check"]).contains("other hosts  gated"));
 
     let selected = config(daemon.dir.path(), verify, "  mode: selected\n  hosts: [jellyfin.example.com]\n");
+    let candidate = daemon.dir.path().join("candidate.yaml");
+    std::fs::write(&candidate, &selected).unwrap();
+    let report = daemon.run(&["check", &candidate.display().to_string()]);
+    assert!(report.contains("jellyfin.example.com  gated"), "{report}");
+    assert_eq!(daemon.verify(UNKNOWN), 403, "check applies nothing");
+
     std::fs::write(daemon.config(), selected).unwrap();
     assert!(daemon.run(&["reload"]).starts_with("policy reloaded\n"));
     assert_eq!(daemon.verify(UNKNOWN), 204);
