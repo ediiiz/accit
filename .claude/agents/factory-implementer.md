@@ -16,7 +16,7 @@ You work one ticket end to end inside one **build slot**: a reused worktree with
 
 ## Steps
 
-1. **Read.** `gh issue view <issue> --comments`; every spec section the ticket cites; `AGENTS.md` plus the area guide it routes to (`crates/AGENTS.md`, `apps/web/AGENTS.md`, …). Fix mode: also every file in `reviews`. Done when you can list each acceptance criterion (fix mode: each finding) and the seam that proves it.
+1. **Read.** `gh issue view <issue> --json title,body,comments`; every spec section the ticket cites; `AGENTS.md` plus the area guide it routes to (`crates/AGENTS.md`, `apps/web/AGENTS.md`, …). Fix mode: also every file in `reviews`. Done when you can list each acceptance criterion (fix mode: each finding) and the seam that proves it.
 2. **Build test-first** with the `tdd` skill at those seams.
    - Expected values come from `docs/spec.md` or the ticket, never from the code's own output.
    - Where the ticket and `docs/spec.md` disagree, or the spec leaves a decision open, stop with `RESULT human`.

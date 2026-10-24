@@ -2,12 +2,12 @@
 
 Issues and specs for this repo live as GitHub issues on `github.com/ediiiz/accit`. Use the [`gh`](https://cli.github.com/) CLI for all operations. It infers the repo from the `origin` remote when run inside the clone; check the login with `gh auth status`.
 
-Prefer `--json <fields>` with `--jq` over parsing plain text.
+Prefer `--json <fields>` with `--jq` over parsing plain text. Always pass `--json` to `gh issue view` / `gh pr view`: without it, older `gh` releases fail on a GitHub GraphQL deprecation (Projects classic).
 
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "<title>" --body-file <file> [--label <label>]`. Write multi-line bodies to a file under `$CLAUDE_JOB_DIR/tmp` (or a heredoc) first; without `--body`/`--body-file` it opens an editor.
-- **Read an issue**: `gh issue view <n> --comments` (title, body and all comments).
+- **Read an issue**: `gh issue view <n> --json title,body,comments` (title, body and all comments).
 - **List issues**: `gh issue list --label <label> --state open|closed|all`; also `--assignee`, `--author`, `--milestone`, `--search`.
 - **Comment on an issue**: `gh issue comment <n> --body-file <file>`.
 - **Apply / remove labels**: `gh issue edit <n> --add-label <label>` / `--remove-label <label>`. A label must exist first: `gh label list`, `gh label create <name> --color <hex> --description "<description>"` (older `gh` without `label`: `gh api repos/{owner}/{repo}/labels -f name=… -f color=…`).
@@ -26,7 +26,7 @@ Operations the CLI lacks (bulk queries, issue dependencies): `gh api repos/{owne
 
 When set to `yes`, PRs run through the same labels and states as issues, using the `gh pr` equivalents:
 
-- **Read a PR**: `gh pr view <n> --comments`, and `gh pr diff <n>` for the diff.
+- **Read a PR**: `gh pr view <n> --json title,body,comments`, and `gh pr diff <n>` for the diff.
 - **List external PRs for triage**: `gh pr list --json number,title,author,authorAssociation`, then keep only PRs whose `authorAssociation` is not `OWNER`, `MEMBER` or `COLLABORATOR`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit <n> --add-label`, `gh pr close`.
 
@@ -36,7 +36,7 @@ Create a GitHub issue.
 
 ## When a skill says "fetch the relevant ticket"
 
-Run `gh issue view <n> --comments`.
+Run `gh issue view <n> --json title,body,comments`.
 
 ## Wayfinding operations
 
