@@ -1,5 +1,7 @@
 # Agent factory
 
+> **Not usable yet for accit.** The slot tooling (`scripts/factory/slots.py`) still gives each slot its own Postgres database, and the agent prompts still mention `sqlx prepare` and `api:generate`. accit uses SQLite files and no generated client. Rework the slots before running `/loop /factory`.
+
 Implements the V1 tickets unattended: one Claude Code session runs `/loop /factory`, dispatches background agents, and lands their PRs on `staging` after automated review, integration and CI.
 
 ## Pipeline

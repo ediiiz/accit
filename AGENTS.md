@@ -63,7 +63,7 @@ Load relevant repo-local skills from `.agents/skills/` when matching work:
 
 ### Issue tracker
 
-GitHub issues on `github.com/OWNER/REPO`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+GitHub issues on `github.com/ediiiz/accit`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

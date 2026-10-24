@@ -4,20 +4,20 @@
 
 Use this file for work in `apps/web`.
 
-If a task also requires backend changes (routes, schema, permissions), work in `crates/` and regenerate the client types (`bun run api:generate`).
+The Portal is one prerendered route. Its API (`/api/status`, `/api/unlock`, `/api/revoke`) lives in `crates/` (`docs/spec.md` section 8); keep the TypeScript types in `#lib` in step with it by hand.
 
 If adding, reading, validating, or renaming env vars, also follow `packages/env/AGENTS.md`. Env schemas live there only; import shared env exports instead of making app-local duplicates.
 
-For frontend UI/UX work, also read `apps/web/DESIGN.md`.
+For any UI work, also read `apps/web/DESIGN.md`.
 
 ## UI copy
 
 Applies to every user-visible string (`messages/*.json`, `aria-label`, `title`, placeholders).
 
 - Minimum words. A label beats a sentence; a heading needs no description unless it adds a fact.
-- No subtext: no explaining the UI ("Use the sidebar to…"), no restating the heading, no tech-stack mentions ("from Convex"), no reassurance or marketing tone ("Single sign-on via Authentik. No passwords stored here.").
+- Screen copy comes from `docs/spec.md` section 9. No subtext, no infrastructure words, no reassurance or marketing tone.
 - Descriptions, hints, empty states: one short line, only when they tell the user something new or what to do next.
-- Buttons: verb + object ("Create project"). Status: one word ("Synced", "Open").
+- Buttons: verb + object ("Enable access").
 - When in doubt, delete the string.
 
 Before adding or changing behaviour, read `apps/web/TESTING.md`: tests come first.
@@ -64,28 +64,11 @@ The `svelte` MCP server (configured in `.mcp.json`) gives you comprehensive Svel
 
 <!-- Data-Layer:BEGIN -->
 
-## Data layer: OpenAPI client + TanStack Query + live socket
+## Data
 
-- **Types**: `src/lib/api/*.gen.ts` are generated from the Rust server (`app openapi`, `app permissions`).
-  After a route or permission change in `crates/`: `bun run api:generate` (needs `target/debug/app`;
-  `APP_BIN` overrides). Commit the generated files. Never edit them.
-- **Reads**: query option factories in `#lib/queries/<segment>.ts` (`projectQueries.list()`,
-  `accessQueries.me()`, …). Components call `createQuery(() => projectQueries.list())`;
-  results have `.data` / `.isLoading`. Never hand-write query keys or `queryFn`s in components.
-- **Prefetch**: `+page.ts` / `+layout.ts` prefetch the same options with the load's `fetch` (the app is static, `ssr = false`; loads run in the browser):
-  `const { queryClient } = await parent(); await queryClient.prefetchQuery(projectQueries.list(loadApi(fetch, url)))`.
-- **Writes**: `await unwrap(browserApi().POST("/api/projects", { body: { name } }))` (wrap in `toastApiError` for a toast).
-  Path params: `{ params: { path: { projectId } } }`. Successful writes through `browserApi` invalidate active queries; no `createMutation` boilerplate.
-- **Body types**: `Schema<"ProjectView">` from `#lib/api.js`.
-- **Permissions**: `#lib/permissions.js` (statements, built-in roles, `parseRoles`, `hasPermissions`), generated from `crates/auth/src/permissions.rs`.
-- **Live**: `#lib/live.svelte.ts` holds one WebSocket to `/api/live`. The server pushes `{ topic }`
-  and every query whose key starts with that topic refetches. Query keys therefore start with the
-  topic (`projects`, `access`, `organizations`). After switching the active organization,
-  call `live.reset()`.
-- **Auth**: the official Better Auth client (`#lib/auth-client.js`) against `/api/auth/*`; its plugin list mirrors `crates/auth/src/lib.rs`.
-- Docs: TanStack Query Svelte `https://tanstack.com/query/latest/docs/framework/svelte/overview`,
-  openapi-fetch `https://openapi-ts.dev/openapi-fetch/`.
-  TanStack examples are mostly React; the Svelte 5 adapter takes a thunk: `createQuery(() => options)`.
+- Plain `fetch` against the same origin; no client library. Every request sends `credentials: "same-origin"`; mutations send the CSRF token from `/api/status` and `Content-Type: application/json`.
+- Status is fetched on load, on focus and immediately before Unlock. Nothing is cached offline.
+- The only persisted value is the Address of the last successful Unlock (`localStorage`), used for the "connection changed" state.
 
 <!-- Data-Layer:END -->
 

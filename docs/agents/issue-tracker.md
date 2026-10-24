@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues on `github.com/OWNER/REPO`. Use the [`gh`](https://cli.github.com/) CLI for all operations. It infers the repo from the `origin` remote when run inside the clone; check the login with `gh auth status`.
+Issues and specs for this repo live as GitHub issues on `github.com/ediiiz/accit`. Use the [`gh`](https://cli.github.com/) CLI for all operations. It infers the repo from the `origin` remote when run inside the clone; check the login with `gh auth status`.
 
 Prefer `--json <fields>` with `--jq` over parsing plain text.
 
@@ -10,7 +10,7 @@ Prefer `--json <fields>` with `--jq` over parsing plain text.
 - **Read an issue**: `gh issue view <n> --comments` (title, body and all comments).
 - **List issues**: `gh issue list --label <label> --state open|closed|all`; also `--assignee`, `--author`, `--milestone`, `--search`.
 - **Comment on an issue**: `gh issue comment <n> --body-file <file>`.
-- **Apply / remove labels**: `gh issue edit <n> --add-label <label>` / `--remove-label <label>`. A label must exist first: `gh label list`, `gh label create <name> --color <hex> --description "<description>"`.
+- **Apply / remove labels**: `gh issue edit <n> --add-label <label>` / `--remove-label <label>`. A label must exist first: `gh label list`, `gh label create <name> --color <hex> --description "<description>"` (older `gh` without `label`: `gh api repos/{owner}/{repo}/labels -f name=… -f color=…`).
 - **Edit**: `gh issue edit <n> --title … | --body-file …`.
 - **Close**: `gh issue close <n> --comment "<why>"` posts the comment and closes in one step.
 - **Assign**: `gh issue edit <n> --add-assignee <user>` (`@me` for yourself).

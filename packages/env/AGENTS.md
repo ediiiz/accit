@@ -1,6 +1,6 @@
 # packages/env
 
-Env schemas of the web app and its tooling. The server's env lives in `crates/config` (Rust).
+Env schemas of the web app and its tooling. accit itself reads no env beyond `ACCIT_CONFIG`; its configuration is `/config/accit.yaml` (`crates/config`).
 
 ## What it is
 
@@ -10,7 +10,7 @@ Env schemas of the web app and its tooling. The server's env lives in `crates/co
 
 ## How it works
 
-- Add every new web/tooling env var here first; server vars go in `crates/config/src/lib.rs` and `.env.example`.
+- Add every new web/tooling env var here first. accit settings belong in its YAML config, not in env vars.
 - Do not create app-local or package-local env schemas.
 - Apps/packages import from `@accit/env/web` or `/env/server`.
 - Add vars to file that owns them.
@@ -26,8 +26,6 @@ Env schemas of the web app and its tooling. The server's env lives in `crates/co
 ```bash
 BACKEND_URL=http://127.0.0.1:3000
 ```
-
-`.env.example` (repo root) holds the server's (DATABASE_URL, BETTER_AUTH_SECRET, ...).
 
 ## Rules
 
