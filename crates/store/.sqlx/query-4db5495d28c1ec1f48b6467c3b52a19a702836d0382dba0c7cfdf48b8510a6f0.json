@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO audit_events (action, address, at) SELECT ?, address, ? FROM grants WHERE expires_at > ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "4db5495d28c1ec1f48b6467c3b52a19a702836d0382dba0c7cfdf48b8510a6f0"
+}

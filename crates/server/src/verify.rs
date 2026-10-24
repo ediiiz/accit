@@ -17,9 +17,10 @@ use config::{Config, Profile};
 use store::Grants;
 
 use crate::health::Readiness;
+use crate::stats::{Stats, Status};
 use crate::trust::{self, Digested, ProxyTrust};
 
-const GATES_NOTHING: &str = "protection: selected mode without hosts; no host requires a Grant";
+pub(crate) const GATES_NOTHING: &str = "protection: selected mode without hosts; no host requires a Grant";
 
 /// What a reload may not change: the gate and the proxy trust were built from it at startup.
 #[derive(Debug)]
@@ -73,6 +74,7 @@ struct Rules {
     protection: RwLock<Arc<Protection>>,
     fixed: Fixed,
     grants: Grants,
+    stats: Stats,
 }
 
 /// The gate decision's inputs: the Policy, the Trusted networks, the Portal host, the profile and the Grants.
@@ -85,6 +87,7 @@ impl Verifier {
             protection: RwLock::new(Arc::new(Protection::from(config))),
             fixed: Fixed::of(config),
             grants,
+            stats: Stats::new(),
         }))
     }
 
@@ -128,6 +131,10 @@ impl Verifier {
         Arc::clone(&self.0.protection.read().unwrap_or_else(PoisonError::into_inner))
     }
 
+    pub(crate) fn grants(&self) -> &Grants {
+        &self.0.grants
+    }
+
     /// Inside a Trusted network and not excluded: the Portal shows `trusted` and offers no Unlock.
     pub(crate) fn is_trusted(&self, address: Address) -> bool {
         self.protection().trusted.contains(address)
@@ -143,9 +150,17 @@ impl Verifier {
         };
         let values = |name| headers.get_all(name).into_iter().map(HeaderValue::as_bytes);
 
-        gate.decide(values("x-forwarded-for"), values("x-forwarded-host"), |address| {
+        let verdict = gate.decide(values("x-forwarded-for"), values("x-forwarded-host"), |address| {
             self.0.grants.active_until(address, SystemTime::now()).is_some()
-        })
+        });
+        self.0.stats.record(verdict);
+
+        verdict
+    }
+
+    /// Counters for `accit admin status`: totals only, never an Address.
+    pub(crate) fn status(&self) -> Status {
+        self.0.stats.status(self.0.grants.active_count(SystemTime::now()))
     }
 }
 

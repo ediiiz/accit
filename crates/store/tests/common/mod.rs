@@ -50,15 +50,24 @@ impl Database {
 impl Database {
     /// Makes every `operation` (`INSERT`, `DELETE`) on `table` fail, as a full or broken disk would.
     pub async fn fail(&self, operation: &str, table: &str) {
+        self.execute(format!(
+            "CREATE TRIGGER fail_{operation}_{table} BEFORE {operation} ON {table}
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END"
+        ))
+        .await;
+    }
+
+    /// Undoes [`Self::fail`].
+    pub async fn heal(&self, operation: &str, table: &str) {
+        self.execute(format!("DROP TRIGGER fail_{operation}_{table}")).await;
+    }
+
+    async fn execute(&self, sql: String) {
         use sqlx::{Connection, SqliteConnection};
 
         let mut connection =
             SqliteConnection::connect(&format!("sqlite://{}", self.path.display())).await.unwrap();
-        let trigger = format!(
-            "CREATE TRIGGER fail_{operation}_{table} BEFORE {operation} ON {table}
-             BEGIN SELECT RAISE(ABORT, 'injected failure'); END"
-        );
 
-        sqlx::raw_sql(sqlx::AssertSqlSafe(trigger)).execute(&mut connection).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(&mut connection).await.unwrap();
     }
 }

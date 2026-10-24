@@ -16,6 +16,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }
 base64 = "0.22"
 getrandom = "0.4"
+httpdate = "1"
 idna = "1"
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +44,7 @@ tokio = { version = "1", features = [
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+x509-parser = "0.18"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

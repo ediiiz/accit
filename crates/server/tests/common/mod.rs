@@ -18,6 +18,7 @@ use server::{portal, verify};
 use store::{Grants, Limits};
 use tower::ServiceExt;
 
+mod faults;
 pub mod harness;
 
 pub type Headers = Vec<(String, String)>;
