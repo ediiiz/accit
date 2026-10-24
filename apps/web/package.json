@@ -25,7 +25,7 @@
     "test:component": "vitest run --project component",
     "test:vitest": "vitest run",
     "test:vitest:watch": "vitest",
-    "test": "bun run test:vitest && bun run test:e2e"
+    "test": "bun run test:vitest"
   },
   "dependencies": {
     "@accit/env": "workspace:*",
