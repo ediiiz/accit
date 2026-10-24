@@ -152,10 +152,10 @@ One prerendered SvelteKit route, Paraglide (English, German; browser language, a
 `accit admin <command>`, run in the container, talks to the daemon over a Unix socket (owner-only permissions, never exposed through Traefik):
 
 - `list`, `revoke <address>`, `revoke-all`
-- `check [file]`: validate a config without applying it; dry-run coverage table; client CA expiry; empty-selection and link warnings
+- `check [file]`: validate a config without applying it; dry-run coverage table; client CA expiry; empty-selection and link warnings. Runs locally in the CLI process, not over the socket
 - `reload`
-- `status`: counts of active Grants, verifications per minute, denials
-- `recover --discard-grants | --keep-grants`
+- `status`: counts of active Grants, verifications per minute, denials since start
+- `recover --discard-grants | --keep-grants` (`--keep-grants` may restore a Grant whose Revoke failed)
 
 Client CA and shared bundle: `scripts/client-ca` on the admin's machine creates the dedicated CA, a one-year shared leaf and the password-protected `.p12`, and handles rotation (new CA). The CA private key never enters the image or container. accit reads only the public trust file and warns from 30 days before expiry.
 
