@@ -86,11 +86,29 @@ fn public_origin_is_an_https_origin() {
         "https://user@access.example.com",
         "https://access.example.com:",
         "https://access.example.com:99999",
+        "https://access.example.com:0",
         "https://10.0.0.1",
         "'https://*.example.com'",
     ] {
         assert!(origin(value).is_err(), "{value}");
     }
+}
+
+#[test]
+fn the_default_https_port_is_dropped_from_the_origin() {
+    for value in ["https://access.example.com:443", "https://access.example.com:443/"] {
+        let config = load(&PRODUCTION.replace("https://access.example.com", value)).unwrap();
+
+        assert_eq!(config.public_origin.as_deref(), Some("https://access.example.com"), "{value}");
+    }
+}
+
+#[test]
+fn another_port_stays_in_the_origin() {
+    let config =
+        load(&PRODUCTION.replace("https://access.example.com", "https://Access.Example.com:8443/")).unwrap();
+
+    assert_eq!(config.public_origin.as_deref(), Some("https://access.example.com:8443"));
 }
 
 #[test]

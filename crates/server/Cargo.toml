@@ -18,7 +18,10 @@ config.workspace = true
 store.workspace = true
 anyhow.workspace = true
 axum.workspace = true
+getrandom.workspace = true
 rust-embed.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio.workspace = true
@@ -26,6 +29,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tower.workspace = true
