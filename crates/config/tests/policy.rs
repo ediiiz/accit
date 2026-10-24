@@ -43,6 +43,8 @@ fn all_mode_without_exclusions_gates_every_host() {
 fn hosts_are_rejected_in_all_mode() {
     assert!(parse("profile: test\nprotection:\n  mode: all\n  hosts: [a.example.com]\n").is_err());
     assert!(parse("profile: test\nprotection:\n  mode: all\n  hosts: []\n").is_err());
+    assert!(parse("profile: test\nprotection:\n  mode: all\n  hosts:\n").is_err());
+    assert!(parse("profile: test\nprotection:\n  mode: all\n  hosts: ~\n").is_err());
 }
 
 #[test]
@@ -51,6 +53,8 @@ fn excluded_hosts_are_rejected_in_selected_mode() {
         parse("profile: test\nprotection:\n  mode: selected\n  excluded_hosts: [a.example.com]\n").is_err()
     );
     assert!(parse("profile: test\nprotection:\n  mode: selected\n  excluded_hosts: []\n").is_err());
+    assert!(parse("profile: test\nprotection:\n  mode: selected\n  excluded_hosts:\n").is_err());
+    assert!(parse("profile: test\nprotection:\n  mode: selected\n  excluded_hosts: ~\n").is_err());
 }
 
 #[test]
@@ -68,7 +72,7 @@ fn paths_ports_and_schemes_are_rejected() {
 
 #[test]
 fn the_portal_host_may_not_be_listed_in_either_mode() {
-    let portal = "portal_host: Access.Example.com\n";
+    let portal = "public_origin: https://Access.Example.com\n";
 
     assert!(parse(&format!("{portal}{}", selected("[access.example.com]"))).is_err());
     assert!(parse(&format!("{portal}{}", all("[access.example.com]"))).is_err());
@@ -76,7 +80,7 @@ fn the_portal_host_may_not_be_listed_in_either_mode() {
 
 #[test]
 fn other_hosts_may_be_listed_next_to_a_portal_host() {
-    let yaml = format!("portal_host: access.example.com\n{}", selected("[jellyfin.example.com]"));
+    let yaml = format!("public_origin: https://access.example.com\n{}", selected("[jellyfin.example.com]"));
 
     assert!(parse(&yaml).is_ok());
 }

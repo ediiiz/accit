@@ -159,7 +159,11 @@ Client CA and shared bundle: `scripts/client-ca` on the admin's machine creates 
 
 ## 12. Configuration
 
-YAML at `/config/accit.yaml`, unknown fields rejected. Keys: `profile` (`production` or `test`, required; `test` allows private Addresses and logs a warning at startup and hourly), `public_origin`, `portal_host`, `title`, `default_language`, `grant_duration`, `max_grants`, `audit_retention`, `apps`, `protection`, `trusted_proxy` (exact address), `proxy_token_file`, `docker_networks`, `client_ca_file`, `listen` (portal, verify), `database`, `admin_socket`.
+YAML at `/config/accit.yaml`, unknown fields rejected. Keys: `profile` (`production` or `test`, required; `test` allows private Addresses and logs a warning at startup and hourly), `public_origin`, `title`, `default_language`, `grant_duration`, `max_grants`, `audit_retention`, `apps`, `protection`, `trusted_proxy` (exact address), `proxy_token_file`, `docker_networks`, `client_ca_file`, `listen` (portal, verify), `database`, `admin_socket`.
+
+With `profile: production`, `public_origin`, `trusted_proxy` and `proxy_token_file` are required; a config without them does not load. With `profile: test` they may be omitted for local development. `public_origin` is exactly `https://<hostname>` with an optional `:port` and an optional trailing `/`, and no path, query, fragment or userinfo; the Portal host is its hostname, parsed like a Policy entry. The Portal host may not appear in either Policy list whenever `public_origin` is set. `trusted_proxy` is an Address and is stored canonicalized (an IPv4-mapped IPv6 address becomes IPv4).
+
+Value formats: durations are a whole number followed by `s`, `m`, `h` or `d` (for example `90m`, `7d`). `default_language` is `en` or `de`, default `en`. App links are `{name, url}`, with an `https://` URL whose host parses like a Policy entry. `max_grants` is at least 1. `audit_retention` is at least 1 hour.
 
 ## 13. Runtime hardening
 

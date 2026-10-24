@@ -1,5 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+
+use crate::origin;
 
 /// A link shown in the Portal. Display-only: never part of the Policy.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,11 +23,11 @@ impl RawApp {
             bail!("an app link needs a name");
         }
 
-        let authority = self.url.strip_prefix("https://").and_then(|rest| rest.split('/').next());
-
-        if authority.is_none_or(str::is_empty) {
+        let Some(authority) = origin::https_authority(&self.url) else {
             bail!("app link `{}` must be an https:// URL", self.name);
-        }
+        };
+
+        origin::host_and_port(authority).with_context(|| format!("app link `{}`", self.name))?;
 
         Ok(AppLink { name: self.name, url: self.url })
     }

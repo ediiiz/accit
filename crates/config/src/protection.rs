@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use access::{Hostname, Policy};
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -18,8 +18,34 @@ enum Mode {
 pub(crate) struct RawProtection {
     /// Required on purpose: no mode is a safe default.
     mode: Mode,
-    hosts: Option<Vec<String>>,
-    excluded_hosts: Option<Vec<String>>,
+    #[serde(default)]
+    hosts: Key,
+    #[serde(default)]
+    excluded_hosts: Key,
+}
+
+/// A list key as written; `Null` (`hosts:`) is kept apart from `Absent` so the wrong mode can reject it.
+#[derive(Debug, Default)]
+enum Key {
+    #[default]
+    Absent,
+    Null,
+    List(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Option::deserialize(deserializer)?.map_or(Self::Null, Self::List))
+    }
+}
+
+impl Key {
+    fn entries(&self) -> &[String] {
+        match self {
+            Self::List(entries) => entries,
+            Self::Absent | Self::Null => &[],
+        }
+    }
 }
 
 fn hostnames(key: &str, entries: &[String]) -> Result<BTreeSet<Hostname>> {
@@ -31,15 +57,15 @@ fn hostnames(key: &str, entries: &[String]) -> Result<BTreeSet<Hostname>> {
 
 impl RawProtection {
     pub(crate) fn validate(self, portal_host: Option<&Hostname>) -> Result<Policy> {
-        let policy = match (self.mode, self.hosts, self.excluded_hosts) {
-            (Mode::Selected, hosts, None) => {
-                Policy::Selected { hosts: hostnames("hosts", &hosts.unwrap_or_default())? }
+        let policy = match (self.mode, &self.hosts, &self.excluded_hosts) {
+            (Mode::Selected, hosts, Key::Absent) => {
+                Policy::Selected { hosts: hostnames("hosts", hosts.entries())? }
             }
-            (Mode::All, None, excluded) => {
-                Policy::All { excluded: hostnames("excluded_hosts", &excluded.unwrap_or_default())? }
+            (Mode::All, Key::Absent, excluded) => {
+                Policy::All { excluded: hostnames("excluded_hosts", excluded.entries())? }
             }
-            (Mode::Selected, _, Some(_)) => bail!("protection.excluded_hosts is only allowed in all mode"),
-            (Mode::All, Some(_), _) => bail!("protection.hosts is only allowed in selected mode"),
+            (Mode::Selected, _, _) => bail!("protection.excluded_hosts is only allowed in all mode"),
+            (Mode::All, _, _) => bail!("protection.hosts is only allowed in selected mode"),
         };
 
         if let Some(portal) = portal_host.filter(|portal| policy.listed().any(|listed| listed == *portal)) {

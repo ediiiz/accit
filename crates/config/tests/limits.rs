@@ -39,6 +39,33 @@ fn app_links_without_a_host_are_rejected() {
 }
 
 #[test]
+fn app_links_need_a_parsable_host() {
+    for url in [
+        "'https://?x'",
+        "'https://#'",
+        "'https://:8443'",
+        "'https://a b.example.com'",
+        "'https://user@a.example.com'",
+        "'https://10.0.0.1/'",
+        "'https://a.example.com:99999'",
+    ] {
+        assert!(with(&app(url)).is_err(), "{url}");
+    }
+}
+
+#[test]
+fn app_links_may_have_a_port_path_query_and_fragment() {
+    for url in [
+        "https://a.example.com:8443",
+        "https://a.example.com/web/index.html",
+        "'https://a.example.com?x=1'",
+        "'https://a.example.com#top'",
+    ] {
+        assert!(with(&app(url)).is_ok(), "{url}");
+    }
+}
+
+#[test]
 fn app_links_need_a_name() {
     assert!(with("apps:\n  - url: https://a.example.com\n").is_err());
     assert!(with("apps:\n  - name: ''\n    url: https://a.example.com\n").is_err());
@@ -93,4 +120,17 @@ fn audit_retention_and_cap_are_configurable() {
 fn a_negative_cap_is_rejected() {
     assert!(with("max_grants: -1\n").is_err());
     assert!(parse("profile: test\nprotection:\n  mode: selected\nmax_grants: many\n").is_err());
+}
+
+#[test]
+fn a_cap_of_zero_is_rejected() {
+    assert!(with("max_grants: 0\n").is_err());
+    assert_eq!(with("max_grants: 1\n").unwrap().max_grants, 1);
+}
+
+#[test]
+fn audit_retention_is_at_least_one_hour() {
+    assert!(with("audit_retention: 0s\n").is_err());
+    assert!(with("audit_retention: 59m\n").is_err());
+    assert_eq!(with("audit_retention: 1h\n").unwrap().audit_retention, Duration::from_secs(HOUR));
 }

@@ -12,7 +12,6 @@ use config::{Config, Language, Profile};
 const FULL: &str = "
 profile: production
 public_origin: https://access.example.com
-portal_host: access.example.com
 title: Home access
 default_language: de
 grant_duration: 3d
@@ -109,6 +108,11 @@ fn trusted_networks_wait_for_their_own_ticket() {
 }
 
 #[test]
+fn the_portal_host_comes_from_public_origin_not_its_own_key() {
+    assert!(with("portal_host: access.example.com\n").is_err());
+}
+
+#[test]
 fn optional_keys_default_to_absent_or_documented_values() {
     let config = with("").unwrap();
 
@@ -131,4 +135,11 @@ fn unknown_language_is_rejected() {
 fn trusted_proxy_is_an_exact_address() {
     assert!(with("trusted_proxy: 172.30.0.0/24\n").is_err());
     assert!(with("trusted_proxy: traefik\n").is_err());
+}
+
+#[test]
+fn trusted_proxy_is_canonicalized() {
+    let config = with("trusted_proxy: '::ffff:172.30.0.2'\n").unwrap();
+
+    assert_eq!(config.trusted_proxy, Some(IpAddr::V4(Ipv4Addr::new(172, 30, 0, 2))));
 }
