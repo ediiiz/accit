@@ -1267,6 +1267,7 @@ dependencies = [
  "axum",
  "config",
  "rust-embed",
+ "sha2 0.11.1",
  "store",
  "subtle",
  "tokio",
