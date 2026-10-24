@@ -42,7 +42,7 @@ Never deleted: your own checkouts and their `target/`.
 1. `cargo` (Rust 1.97) and `bun` on the host.
 2. `gh auth status` shows a login for the configured host (the factory reads the API token via `gh auth token`).
 3. `scripts/factory/factory setup` creates the `factory:*` labels.
-4. CI: with runners picking up pull requests (`rust.yml`, `check.yml`) keep `require_ci: true`. Without CI set `require_ci: false` in `scripts/factory/config.json`; the integrator's local gates are then the only gate. Either way `factory merge` refuses a branch that does not contain the current `staging` tip and sends it back to `approved` for re-integration, so what merges is what was tested.
+4. CI is local: `require_ci` is `false` in `scripts/factory/config.json`, so the integrator's gates (`scripts/ci` on the rebased branch) are the merge gate. `factory merge` still refuses a branch that does not contain the current `staging` tip and sends it back to `approved` for re-integration, so what merges is what was tested.
 
 ## Run
 

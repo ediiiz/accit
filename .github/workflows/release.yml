@@ -104,7 +104,7 @@ jobs:
           set -euo pipefail
           # image = ghcr.io/{owner}/{repo}, lowercased (GHCR rejects uppercase).
           IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          # FULL 40-char sha: one sha scheme across preview.yml and the prod pin
+          # FULL 40-char sha: one sha scheme for the image tags and the prod pin
           # the promote job writes to values.yaml.
           SHA="$GITHUB_SHA"
 

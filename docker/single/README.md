@@ -25,8 +25,7 @@ Run: mount the configuration read-only at `/config/accit.yaml` (or point `ACCIT_
 ## CI build & push (GitHub Actions)
 
 `.github/workflows/release.yml` builds this image (as part of cutting a
-release) and pushes it to GHCR (`ghcr.io/{owner}/{repo}`). `preview.yml`
-builds it for every PR once a `PREVIEW_DOMAIN` repo variable is set.
+release) and pushes it to GHCR (`ghcr.io/{owner}/{repo}`).
 
 Setup:
 

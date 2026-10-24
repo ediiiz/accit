@@ -11,7 +11,7 @@
   "disk_critical_free_gb": 15,
   "max_attempts": 3,
   "max_parallel_reviews": 4,
-  "require_ci": true,
+  "require_ci": false,
   "golden_paths": [],
   "cargo": "cargo",
   "migrations": "crates/store/migrations"

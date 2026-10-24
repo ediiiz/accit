@@ -1,0 +1,27 @@
+#!/bin/sh
+# The full local CI: what must pass before anything merges into staging.
+# GitHub Actions does not run this on its own (budget); .github/workflows/ci.yml
+# is manual-only and runs a subset.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+export CARGO="${CARGO:-cargo}"
+
+step() { printf '\n== %s\n' "$1"; }
+
+step "web: sync"
+bun run --cwd apps/web prebuild >/dev/null
+step "rust gate"
+scripts/check-rust
+step "lint"
+bun run lint
+step "format"
+bun run format:check
+step "typecheck"
+bun run typecheck
+step "unit tests"
+bun run web:test:unit
+step "component tests"
+bun run web:test:component
+
+printf '\nlocal CI passed\n'

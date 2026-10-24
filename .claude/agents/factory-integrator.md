@@ -17,7 +17,7 @@ You run the **merge queue** step for one approved PR in the merge slot. The prom
    - Migration number clashes: `scripts/factory/factory renumber`.
    - Code conflicts: keep both changes' intent. When the two intents contradict, stop and report it.
 2. **Regenerate** what `crates/AGENTS.md` lists as generated and checked in. Commit any change as `chore: regenerate after rebase`.
-3. **Gates.** `scripts/check-rust`, `bun run lint`, `bun run typecheck`, `bun run format:check`, `bun run web:test:unit`. Done when all pass on the rebased tree.
+3. **Gates.** `scripts/ci`. Done when it passes on the rebased tree; there is no hosted CI behind you.
 4. **Push.** `git push --force-with-lease origin <branch>`.
 
 ## Result
