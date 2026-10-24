@@ -2,7 +2,14 @@
 # Rust quality gate (CI and before commit): format, lints as errors, file length, tests.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
-cargo=${CARGO:-"$root/scripts/cargo"}
+# $CARGO wins; else the host toolchain; else the pinned image (scripts/cargo).
+if [ -n "${CARGO:-}" ]; then
+  cargo=$CARGO
+elif command -v cargo >/dev/null 2>&1; then
+  cargo=cargo
+else
+  cargo="$root/scripts/cargo"
+fi
 max_lines=300
 
 "$cargo" fmt --check
