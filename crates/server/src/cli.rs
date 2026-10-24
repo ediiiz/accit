@@ -2,9 +2,10 @@
 
 use std::io::Write;
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use config::Config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -16,6 +17,9 @@ const USAGE: &str = "Usage: accit [command]
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
   admin reload  Reload the Policy in the running daemon (as SIGHUP does).
+  admin check [file]
+                Validate a config without applying it (default: the running config):
+                coverage, warnings, client CA expiry.
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
@@ -47,8 +51,28 @@ async fn serve() -> Result<()> {
     serve::run(Config::load(&path)?, &path).await
 }
 
+/// Runs here, not in the daemon: it validates a file and never applies it.
+fn check(args: &[String]) -> Result<()> {
+    let path = match args {
+        [] => config::path_from_env(),
+        [file] => PathBuf::from(file),
+        _ => bail!("admin check takes at most one file\n\n{USAGE}"),
+    };
+    let report = crate::check::run(&path, SystemTime::now())?;
+    std::io::stdout().write_all(report.text.as_bytes())?;
+    ensure!(!report.failed, "check failed");
+
+    Ok(())
+}
+
 /// Errors come back as the daemon's message and a non-zero exit.
 async fn admin(args: &[String]) -> Result<()> {
+    if let Some((command, rest)) = args.split_first()
+        && command == "check"
+    {
+        return check(rest);
+    }
+
     let command = match args {
         [command] if command == "reload" => command,
         _ => bail!("unknown admin command {args:?}\n\n{USAGE}"),

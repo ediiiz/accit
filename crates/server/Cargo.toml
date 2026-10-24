@@ -27,6 +27,7 @@ subtle.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 sqlx.workspace = true
