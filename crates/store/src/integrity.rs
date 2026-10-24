@@ -44,7 +44,12 @@ impl Guard {
         self.state.subscribe()
     }
 
-    pub(crate) fn fail_closed(&self) {
+    /// Fails closed unless [`Unsaved::saved`] runs first.
+    pub(crate) fn unsaved(&self) -> Unsaved<'_> {
+        Unsaved(Some(self))
+    }
+
+    fn fail_closed(&self) {
         tracing::error!("revoke not saved; failed closed until recovered");
         let reached = match self.marker.as_deref().map_or(Ok(()), write) {
             Ok(()) => Integrity::FailedClosed,
@@ -52,6 +57,24 @@ impl Guard {
         };
 
         self.state.send_modify(|state| *state = (*state).max(reached));
+    }
+}
+
+/// A Revoke's write in flight: dropped before [`Self::saved`] (an error, a panic or cancellation), it fails
+/// closed.
+pub(crate) struct Unsaved<'a>(Option<&'a Guard>);
+
+impl Unsaved<'_> {
+    pub(crate) fn saved(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for Unsaved<'_> {
+    fn drop(&mut self) {
+        if let Some(guard) = self.0 {
+            guard.fail_closed();
+        }
     }
 }
 
