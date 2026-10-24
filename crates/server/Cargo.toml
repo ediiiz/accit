@@ -13,10 +13,12 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
+access.workspace = true
 config.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 rust-embed.workspace = true
+subtle.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

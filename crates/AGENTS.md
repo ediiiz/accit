@@ -10,7 +10,7 @@ Dependencies flow one way: `access ← config ← server`.
 | -------- | ---------------------------------------------------------------------------------------------------------- |
 | `access` | The domain, without I/O: Address, Hostname (canonical parsing), and later Grants and the gate decision.    |
 | `config` | `/config/accit.yaml`: parsing and validation. Unknown keys are errors. No env reads beyond `ACCIT_CONFIG`. |
-| `server` | Listeners, routers (`portal.rs`, `verify.rs`), readiness, static site, CLI (`cli.rs`).                     |
+| `server` | Listeners, routers (`portal.rs`, `verify.rs`), proxy trust (`trust.rs`), readiness, static site, CLI.      |
 
 ## Commands
 
