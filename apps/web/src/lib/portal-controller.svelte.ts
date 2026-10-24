@@ -116,7 +116,10 @@ export class PortalController {
       return this.load();
     }
 
-    return this.secondsLeft > 0 ? Promise.resolve() : this.#mutate(failure.action);
+    // A failed Revoke is confirmed again, through `revoke()`.
+    return this.secondsLeft > 0 || failure.action === "revoke"
+      ? Promise.resolve()
+      : this.#mutate(failure.action);
   }
 
   destroy(): void {

@@ -4,6 +4,7 @@ import { page, userEvent } from "vitest/browser";
 import { ApiError, type PortalStatus } from "#lib/api.js";
 import { ADDRESS, deferred, fakeApi, memoryStore, status } from "#lib/fixtures.js";
 import { PortalController } from "#lib/portal-controller.svelte.js";
+import "../../../app.css";
 import Portal from "./portal.svelte";
 
 const active = status({
@@ -57,6 +58,38 @@ describe("not enabled", () => {
     await expect
       .element(page.getByRole("status").getByRole("heading", { name: "Access your apps." }))
       .toBeVisible();
+  });
+});
+
+describe("live regions", () => {
+  it("stay in the accessibility tree while empty, then carry the status", async () => {
+    const loading = deferred<PortalStatus>();
+    const { api } = fakeApi({ status: [loading.promise] });
+    const portal = new PortalController(api, memoryStore(null));
+
+    await render(Portal, { portal, languages: ["en-US"] });
+
+    await expect.element(page.getByRole("status")).toBeInTheDocument();
+    await expect.element(page.getByRole("alert")).toBeInTheDocument();
+    await expect.element(page.getByRole("heading")).not.toBeInTheDocument();
+
+    loading.resolve(status());
+
+    await expect
+      .element(page.getByRole("status").getByRole("heading", { name: "Access your apps." }))
+      .toBeVisible();
+    await expect.element(page.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("the alert stays and takes the failure when a status clears", async () => {
+    await mount({ status: [status(), status()], unlock: [new ApiError("unavailable")] });
+
+    await expect.element(page.getByRole("alert")).toBeInTheDocument();
+    await button("Enable access").click();
+
+    await expect.element(alert("We couldn't enable access.")).toBeVisible();
+    await expect.element(page.getByRole("status")).toBeInTheDocument();
+    await expect.element(page.getByRole("status").getByRole("heading")).not.toBeInTheDocument();
   });
 });
 
@@ -208,6 +241,29 @@ describe("revoke", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Disable access" }).click();
 
     await expect.element(alert("We couldn't disable access.")).toBeVisible();
+  });
+
+  it("Try again after a failed revoke asks for confirmation again", async () => {
+    const { calls } = await mount({
+      status: [active, active, active],
+      revoke: [new ApiError("unavailable"), status()],
+    });
+
+    await button("Disable access for this connection").click();
+    await page.getByRole("dialog").getByRole("button", { name: "Disable access" }).click();
+    await expect.element(alert("We couldn't disable access.")).toBeVisible();
+
+    await button("Try again").click();
+
+    await expect
+      .element(page.getByRole("dialog", { name: "Disable access for this connection?" }))
+      .toBeVisible();
+    expect(mutations(calls)).toEqual(["revoke:token"]);
+
+    await page.getByRole("dialog").getByRole("button", { name: "Disable access" }).click();
+
+    await expect.element(page.getByText("Access your apps.")).toBeVisible();
+    expect(mutations(calls)).toEqual(["revoke:token", "revoke:token"]);
   });
 
   it("is not offered when there is no Grant", async () => {

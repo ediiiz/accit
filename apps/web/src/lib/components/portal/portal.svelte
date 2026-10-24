@@ -53,9 +53,17 @@
 
 	const failed = $derived(portal.screen === 'unavailable' || portal.screen === 'rate_limited');
 
-	const action = $derived(primaryAction(portal.screen, portal.secondsLeft));
+	const action = $derived(primaryAction(portal.screen, portal.secondsLeft, portal.failedAction));
+
+	let confirmingRevoke = $state(false);
 
 	function run(command: PrimaryAction['command']) {
+		if (command === 'revoke') {
+			confirmingRevoke = true;
+
+			return;
+		}
+
 		return command === 'unlock' ? portal.unlock() : portal.retry();
 	}
 
@@ -98,12 +106,12 @@
 {/snippet}
 
 <main class="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-4 py-10">
-	<div role="status" class="empty:hidden">
+	<div role="status" class="empty:sr-only">
 		{#if copy && !failed}
 			{@render message(copy)}
 		{/if}
 	</div>
-	<div role="alert" class="empty:hidden">
+	<div role="alert" class="empty:sr-only">
 		{#if copy && failed}
 			{@render message(copy)}
 		{/if}
@@ -124,8 +132,13 @@
 		<AppLinks apps={portal.status.apps} />
 	{/if}
 
-	{#if portal.screen === 'enabled'}
-		<RevokeDialog busy={portal.revoking} onconfirm={() => portal.revoke()} />
+	{#if portal.screen === 'enabled' || portal.failedAction === 'revoke'}
+		<RevokeDialog
+			busy={portal.revoking}
+			trigger={portal.screen === 'enabled'}
+			bind:open={confirmingRevoke}
+			onconfirm={() => portal.revoke()}
+		/>
 	{/if}
 
 	{#if showTip}
