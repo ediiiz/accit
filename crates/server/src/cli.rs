@@ -2,9 +2,10 @@
 
 use std::io::Write;
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use config::Config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -24,6 +25,10 @@ const USAGE: &str = "Usage: accit [command]
                 Revoke every Grant.
   admin recover --discard-grants | --keep-grants
                 Leave the failed-closed state, deleting (recommended) or keeping the stored Grants.
+  admin status  Active Grants, verifications per minute and denials.
+  admin check [file]
+                Validate a config without applying it (default: the running config):
+                coverage, warnings, client CA expiry.
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
@@ -55,11 +60,31 @@ async fn serve() -> Result<()> {
     serve::run(Config::load(&path)?, &path).await
 }
 
+/// Runs here, not in the daemon: it validates a file and never applies it.
+fn check(args: &[String]) -> Result<()> {
+    let path = match args {
+        [] => config::path_from_env(),
+        [file] => PathBuf::from(file),
+        _ => bail!("admin check takes at most one file\n\n{USAGE}"),
+    };
+    let report = crate::check::run(&path, SystemTime::now())?;
+    std::io::stdout().write_all(report.text.as_bytes())?;
+    ensure!(!report.failed, "check failed");
+
+    Ok(())
+}
+
 /// Errors come back as the daemon's message and a non-zero exit.
 async fn admin(args: &[String]) -> Result<()> {
+    if let Some((command, rest)) = args.split_first()
+        && command == "check"
+    {
+        return check(rest);
+    }
+
     let command = args.join(" ");
     let grant_command = GrantCommand::parse(&command).map_err(|error| anyhow!("{error:#}\n\n{USAGE}"))?;
-    if command != "reload" && grant_command.is_none() {
+    if !matches!(command.as_str(), "reload" | "status") && grant_command.is_none() {
         bail!("unknown admin command {args:?}\n\n{USAGE}");
     }
     let path = config::path_from_env();

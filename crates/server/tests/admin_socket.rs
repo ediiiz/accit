@@ -6,10 +6,12 @@ mod common;
 
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use axum::http::StatusCode;
 use server::admin;
 use server::verify::{self, Verifier};
+use store::Grants;
 
 #[tokio::test]
 async fn the_socket_is_owner_only() {
@@ -63,6 +65,7 @@ const ALL: &str = "  mode: all\n";
 struct Daemon {
     dir: tempfile::TempDir,
     verifier: Verifier,
+    grants: Grants,
 }
 
 impl Daemon {
@@ -70,7 +73,8 @@ impl Daemon {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("token"), TOKEN).unwrap();
         let config = common::config(&yaml(dir.path(), protection));
-        let daemon = Self { verifier: Verifier::new(&config, common::grants().await), dir };
+        let grants = common::grants().await;
+        let daemon = Self { verifier: Verifier::new(&config, grants.clone()), grants, dir };
         daemon.write(protection);
         let listener = admin::bind(&daemon.socket()).unwrap();
         tokio::spawn(admin::serve(listener, daemon.verifier.clone(), daemon.dir.path().join("accit.yaml")));
@@ -87,12 +91,13 @@ impl Daemon {
     }
 
     async fn status(&self, host: &str) -> StatusCode {
+        self.verify_as("81.2.69.160", host).await
+    }
+
+    async fn verify_as(&self, address: &str, host: &str) -> StatusCode {
         let app = verify::router(common::ready(), common::production(), self.verifier.clone());
-        let headers = [
-            (common::TOKEN_HEADER, common::TOKEN),
-            ("x-forwarded-for", "81.2.69.160"),
-            ("x-forwarded-host", host),
-        ];
+        let headers =
+            [(common::TOKEN_HEADER, common::TOKEN), ("x-forwarded-for", address), ("x-forwarded-host", host)];
 
         common::send(app, Some(common::PROXY), "/verify", &headers).await.status
     }
@@ -150,4 +155,54 @@ async fn an_unknown_command_is_an_error() {
     let error = format!("{:#}", admin::request(&daemon.socket(), "launch").await.unwrap_err());
 
     assert!(error.contains("unknown command"), "{error}");
+}
+
+const GATED: &str = "jellyfin.example.com";
+const OPEN: &str = "photos.example.com";
+
+async fn unlock(daemon: &Daemon, address: &str) {
+    daemon.grants.unlock(address.parse().unwrap(), SystemTime::now()).await.unwrap();
+}
+
+#[tokio::test]
+async fn status_reports_grants_verifications_per_minute_and_denials() {
+    let daemon = Daemon::start(SELECTED).await;
+    unlock(&daemon, "81.2.69.160").await;
+    unlock(&daemon, "81.2.69.161").await;
+    daemon.verify_as("81.2.69.160", GATED).await;
+    daemon.verify_as("81.2.69.160", OPEN).await;
+    daemon.verify_as("81.2.69.162", GATED).await;
+    daemon.verify_as("2001:db8::1", GATED).await;
+
+    let output = admin::request(&daemon.socket(), "status").await.unwrap();
+
+    assert_eq!(output, "active grants: 2\nverifications per minute: 4\ndenials: 2\n");
+}
+
+#[tokio::test]
+async fn status_before_any_verification_is_all_zero() {
+    let daemon = Daemon::start(SELECTED).await;
+
+    let output = admin::request(&daemon.socket(), "status").await.unwrap();
+
+    assert_eq!(output, "active grants: 0\nverifications per minute: 0\ndenials: 0\n");
+}
+
+#[tokio::test]
+async fn status_never_shows_an_address() {
+    let daemon = Daemon::start(SELECTED).await;
+    for address in ["81.2.69.160", "81.2.69.162", "2001:db8::1"] {
+        unlock(&daemon, address).await;
+        daemon.verify_as(address, GATED).await;
+        daemon.verify_as("81.2.69.163", GATED).await;
+    }
+
+    let output = admin::request(&daemon.socket(), "status").await.unwrap();
+
+    for fragment in ["81.2.69", "2001", "db8", "::"] {
+        assert!(!output.contains(fragment), "{fragment} in {output}");
+    }
+    let labels: Vec<&str> =
+        output.lines().filter_map(|line| line.split_once(':')).map(|(label, _)| label).collect();
+    assert_eq!(labels, ["active grants", "verifications per minute", "denials"]);
 }

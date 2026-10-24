@@ -75,3 +75,15 @@ async fn expired_grants_do_not_count_towards_the_cap() {
 
     assert_eq!(newcomer, later + WEEK);
 }
+
+#[tokio::test]
+async fn active_count_counts_unexpired_grants_only() {
+    let database = Database::new();
+    let grants = database.open(limits(), t0()).await;
+    grants.unlock(address("192.0.2.1"), t0()).await.unwrap();
+    grants.unlock(address("192.0.2.2"), t0() + DAY).await.unwrap();
+
+    assert_eq!(grants.active_count(t0()), 2);
+    assert_eq!(grants.active_count(t0() + WEEK), 1);
+    assert_eq!(grants.active_count(t0() + DAY + WEEK), 0);
+}

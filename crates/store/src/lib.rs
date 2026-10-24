@@ -123,6 +123,13 @@ impl Grants {
         active.get(&address).filter(|grant| grant.valid(now)).map(|grant| grant.expiry)
     }
 
+    /// How many Grants `active_until` would answer for at `now`. Never mutates.
+    pub fn active_count(&self, now: SystemTime) -> usize {
+        let active = self.0.active.read().unwrap_or_else(PoisonError::into_inner);
+
+        active.values().filter(|grant| grant.valid(now)).count()
+    }
+
     /// Creates or renews the Grant to `now + grant_duration`; visible only once committed.
     pub async fn unlock(&self, address: Address, now: SystemTime) -> Result<SystemTime, UnlockError> {
         self.mutate(move |inner| async move { inner.unlock(address, now).await }).await
