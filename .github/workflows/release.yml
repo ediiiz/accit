@@ -18,7 +18,7 @@ name: Release
 # checks and push the image (`latest` + `sha-<sha>` tags) without cutting a release.
 #
 # Hardening (docs/spec.md sections 9, 13, 14). The image is first pushed under `sha-<sha>` only;
-# `latest` and `vX.Y.Z` are added after every check passes, so a failed check never moves them:
+# `latest` and `vX.Y.Z` are added after every check passes, so a failed check never moves them (`sha-<sha>` stays in GHCR if a later check fails):
 #   - dependency scan (cargo-deny advisories, bun audit); `scripts/ci` covers the rest locally,
 #   - multi-arch image (linux/amd64, linux/arm64), cross-compiled, with SLSA provenance and a
 #     BuildKit SBOM,

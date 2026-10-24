@@ -23,7 +23,7 @@ computed and the image built in one job, so a failed build never publishes a tag
    - scans dependencies (`scripts/audit`: cargo-deny advisories, `bun audit`),
    - builds and pushes the multi-arch (amd64, arm64) single-container image to GHCR as
      `sha-<sha>` only, cross-compiled and with provenance and an SBOM,
-   - scans that image with Trivy and extracts its SPDX SBOM,
+   - scans that image with Trivy (a failure leaves `sha-<sha>` in GHCR) and extracts its SPDX SBOM,
    - adds the `latest` and version tags, then
    - pushes the `vX.Y.Z` tag and creates a GitHub release with generated notes and the SBOM attached.
 
