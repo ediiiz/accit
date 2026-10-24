@@ -63,7 +63,7 @@ impl ProxyTrust {
         }))
     }
 
-    /// Without a pinned proxy, a loopback peer is trusted. For local development only.
+    /// Warns once, naming each proxy check that is skipped.
     pub fn log_startup(&self) {
         if !self.0.locked && !self.0.skipped.is_empty() {
             tracing::warn!(skipped = %self.0.skipped.join(", "), "proxy checks skipped (profile test)");
