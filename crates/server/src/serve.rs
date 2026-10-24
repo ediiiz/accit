@@ -6,17 +6,18 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use axum::Router;
 use config::Config;
-use store::{Grants, Limits};
+use store::{Grants, Integrity, Limits};
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 
-use crate::health::Readiness;
+use crate::health::{self, Readiness};
 use crate::trust::ProxyTrust;
 use crate::verify::Verifier;
 use crate::{portal, verify};
 
 const DRAIN: Duration = Duration::from_secs(10);
 const CLEANUP: Duration = Duration::from_hours(1);
+const CLOCK_CHECK: Duration = Duration::from_secs(30);
 
 async fn bind(address: SocketAddr) -> Result<TcpListener> {
     TcpListener::bind(address).await.with_context(|| format!("binding {address}"))
@@ -99,16 +100,19 @@ pub async fn run(config: Config) -> Result<()> {
     log_start(&portal_listener, &verify_listener)?;
     // Before serving, so no request sees readiness without the Grants behind it.
     let grants = open_grants(&config).await?;
-    readiness.set(true);
+    let integrity = grants.integrity();
+    readiness.set(*integrity.borrow() == Integrity::Sound);
     tokio::spawn(grants.clone().clean_up_every(CLEANUP));
+    tokio::spawn(health::guard_clocks(readiness.clone(), SystemTime::now, CLOCK_CHECK));
 
     trust.log_startup();
     let verifier = Verifier::new(&config, grants);
     verifier.log_startup();
-    let verify_app = verify::router(readiness, trust.clone(), verifier);
+    let verify_app = verify::router(readiness.clone(), trust.clone(), verifier);
 
     tokio::select! {
         result = serve_both(portal_listener, verify_listener, verify_app, trust, stopping) => result,
+        error = health::follow(readiness, integrity) => Err(error),
         () = drain_after_signal(stop) => Ok(()),
     }
 }

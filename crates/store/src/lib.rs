@@ -3,6 +3,7 @@
 
 mod audit;
 mod database;
+mod integrity;
 mod time;
 
 use std::collections::HashMap;
@@ -12,9 +13,11 @@ use std::time::{Duration, SystemTime};
 
 use access::Address;
 use sqlx::SqliteConnection;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
+use tokio::time::Instant;
 
 pub use audit::{Action, AuditEvent};
+pub use integrity::{FAIL_CLOSED_MARKER, Integrity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -55,12 +58,27 @@ pub enum UnlockError {
     Store(#[from] StoreError),
 }
 
+/// A Grant in memory: both times must lie in the future for it to pass.
+#[derive(Clone, Copy, Debug)]
+struct Grant {
+    expiry: SystemTime,
+    /// Set when the Grant is created or loaded, so a wall-clock jump cannot extend it.
+    deadline: Instant,
+}
+
+impl Grant {
+    fn valid(&self, now: SystemTime) -> bool {
+        self.expiry > now && self.deadline > Instant::now()
+    }
+}
+
 #[derive(Debug)]
 struct Inner {
     limits: Limits,
-    active: RwLock<HashMap<Address, SystemTime>>,
+    active: RwLock<HashMap<Address, Grant>>,
     /// The one mutation path: every change to `active` or the database holds this lock.
     database: Mutex<SqliteConnection>,
+    integrity: integrity::Guard,
 }
 
 /// Cheap to clone; all clones share one state.
@@ -72,16 +90,31 @@ impl Grants {
     /// `None` keeps everything in memory, lost on restart.
     pub async fn open(path: Option<&Path>, limits: Limits, now: SystemTime) -> Result<Self, StoreError> {
         let mut connection = database::connect(path).await?;
-        let active = database::unexpired(&mut connection, now).await?;
+        let loaded = Instant::now();
+        let active = database::unexpired(&mut connection, now)
+            .await?
+            .into_iter()
+            .map(|(address, expiry)| {
+                let remaining = expiry.duration_since(now).unwrap_or_default();
+                (address, Grant { expiry, deadline: loaded + remaining })
+            })
+            .collect();
 
-        Ok(Self(Arc::new(Inner { limits, active: RwLock::new(active), database: Mutex::new(connection) })))
+        let integrity = integrity::Guard::open(path);
+
+        Ok(Self(Arc::new(Inner {
+            limits,
+            active: RwLock::new(active),
+            database: Mutex::new(connection),
+            integrity,
+        })))
     }
 
-    /// The expiry of the Address's Grant, if it is still in the future. Never mutates.
+    /// The expiry of the Address's Grant while its expiry and monotonic deadline both lie ahead. Never mutates.
     pub fn active_until(&self, address: Address, now: SystemTime) -> Option<SystemTime> {
         let active = self.0.active.read().unwrap_or_else(PoisonError::into_inner);
 
-        active.get(&address).copied().filter(|expiry| *expiry > now)
+        active.get(&address).filter(|grant| grant.valid(now)).map(|grant| grant.expiry)
     }
 
     /// Creates or renews the Grant to `now + grant_duration`; visible only once committed.
@@ -89,7 +122,13 @@ impl Grants {
         self.mutate(move |inner| async move { inner.unlock(address, now).await }).await
     }
 
-    /// Removes the Grant from memory first, so it stops passing even if the write then fails.
+    /// [`Integrity::FailedClosed`] when a marker from an earlier failed Revoke is present at open.
+    pub fn integrity(&self) -> watch::Receiver<Integrity> {
+        self.0.integrity.subscribe()
+    }
+
+    /// Removes the Grant from memory first, so it stops passing even if the write then fails; a failed
+    /// write fails closed (see [`Self::integrity`]).
     pub async fn revoke(&self, address: Address, now: SystemTime) -> Result<(), StoreError> {
         self.mutate(move |inner| async move { inner.revoke(address, now).await }).await
     }
@@ -150,7 +189,11 @@ impl Inner {
 
         self.admit(address, now)?;
         database::unlock(&mut connection, address, expiry, now).await?;
-        self.active.write().unwrap_or_else(PoisonError::into_inner).insert(address, expiry);
+        let deadline = Instant::now() + self.limits.grant_duration;
+        self.active
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(address, Grant { expiry, deadline });
 
         Ok(expiry)
     }
@@ -158,7 +201,7 @@ impl Inner {
     /// Renewal always passes; a new Address only below the cap, counting unexpired Grants.
     fn admit(&self, address: Address, now: SystemTime) -> Result<(), UnlockError> {
         let mut active = self.active.write().unwrap_or_else(PoisonError::into_inner);
-        active.retain(|_, expiry| *expiry > now);
+        active.retain(|_, grant| grant.valid(now));
         let full = usize::try_from(self.limits.max_grants).is_ok_and(|max| active.len() >= max);
 
         if full && !active.contains_key(&address) {
@@ -172,14 +215,20 @@ impl Inner {
         let mut connection = self.database.lock().await;
 
         self.active.write().unwrap_or_else(PoisonError::into_inner).remove(&address);
-        database::revoke(&mut connection, address, now).await
+        let written = database::revoke(&mut connection, address, now).await;
+
+        if written.is_err() {
+            self.integrity.fail_closed();
+        }
+
+        written
     }
 
     async fn clean_up(&self, now: SystemTime) -> Result<(), StoreError> {
         let cutoff = now.checked_sub(self.limits.audit_retention).ok_or(StoreError::Time)?;
         let mut connection = self.database.lock().await;
 
-        self.active.write().unwrap_or_else(PoisonError::into_inner).retain(|_, expiry| *expiry > now);
+        self.active.write().unwrap_or_else(PoisonError::into_inner).retain(|_, grant| grant.valid(now));
         database::delete_before(&mut connection, cutoff).await
     }
 }
