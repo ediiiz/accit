@@ -10,8 +10,7 @@ if (!baseURL) {
 }
 
 // The harness's test client certificate (`harness/prepare`); the suite is the Credential holder.
-const clientDir =
-  process.env.E2E_CLIENT_DIR ?? fileURLToPath(new URL("../../harness/run/client", import.meta.url));
+const clientDir = fileURLToPath(new URL("../../harness/run/client", import.meta.url));
 
 export default defineConfig({
   testDir: "./tests/e2e",

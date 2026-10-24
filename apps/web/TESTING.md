@@ -30,5 +30,5 @@ Tests first: write the failing test for the new behaviour or bug, then the code 
 
 ## e2e
 
-- One accit and one source Address: tests run in order, one worker. Mutations are limited to 5 a minute per Address, so the real Unlock and Revoke calls stay under that; screens the stack cannot reach on demand (expired, home network, service unavailable, rate limited) get the API answer they would get there through `page.route`.
-- Axe checks every screen in light and dark (`expectAccessible` in `tests/e2e/axe.ts`).
+- One accit and one source Address: tests run in order, one worker. Mutations are limited to 5 a minute per Address, so the real Unlock and Revoke calls stay under that; screens the stack cannot reach on demand (expired, home network, submitting, service unavailable, rate limited, a changed connection) get the API answer they would get there through `page.route`, built from the real status with only `state` and `expiry` replaced. A held or refused request never reaches accit, so it costs no mutation.
+- Axe checks every screen in light and dark (`expectAccessible` in `tests/e2e/axe.ts`), and the Not enabled screen under a German browser.
