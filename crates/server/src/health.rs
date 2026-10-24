@@ -61,3 +61,20 @@ pub async fn follow(readiness: Readiness, mut integrity: watch::Receiver<Integri
         }
     }
 }
+
+/// Runs `servers` until `stop` resolves, `servers` fails, or the store makes the process stop. Readiness
+/// starts as the store's integrity says and follows it from then on.
+pub async fn supervise(
+    servers: impl Future<Output = anyhow::Result<()>>,
+    readiness: Readiness,
+    integrity: watch::Receiver<Integrity>,
+    stop: impl Future<Output = ()>,
+) -> anyhow::Result<()> {
+    readiness.set(*integrity.borrow() == Integrity::Sound);
+
+    tokio::select! {
+        result = servers => result,
+        error = follow(readiness, integrity) => Err(error),
+        () = stop => Ok(()),
+    }
+}

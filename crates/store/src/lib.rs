@@ -4,6 +4,8 @@
 mod audit;
 mod database;
 mod integrity;
+#[cfg(test)]
+mod interrupted;
 mod time;
 
 use std::collections::HashMap;
@@ -128,9 +130,23 @@ impl Grants {
     }
 
     /// Removes the Grant from memory first, so it stops passing even if the write then fails; a failed
-    /// write fails closed (see [`Self::integrity`]).
+    /// or interrupted write fails closed (see [`Self::integrity`]).
     pub async fn revoke(&self, address: Address, now: SystemTime) -> Result<(), StoreError> {
-        self.mutate(move |inner| async move { inner.revoke(address, now).await }).await
+        self.revoke_task(move |inner| async move { inner.revoke(address, now).await }).await
+    }
+
+    /// A task that died may have left the Grant out of memory but in the database.
+    async fn revoke_task<F>(&self, task: impl FnOnce(Arc<Inner>) -> F) -> Result<(), StoreError>
+    where
+        F: Future<Output = Result<(), StoreError>> + Send + 'static,
+    {
+        let result = self.mutate(task).await;
+
+        if matches!(result, Err(StoreError::Interrupted)) {
+            self.0.integrity.fail_closed();
+        }
+
+        result
     }
 
     /// Deletes Grants and audit events older than audit retention.
