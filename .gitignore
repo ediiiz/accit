@@ -69,3 +69,6 @@ __pycache__/
 
 # /loop's scheduler lock
 .claude/scheduled_tasks.lock
+
+# vitest cache
+apps/web/.vitest/
