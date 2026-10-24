@@ -2,6 +2,8 @@
 
 mod address;
 mod hostname;
+mod policy;
 
 pub use address::{Address, AddressError, Family};
 pub use hostname::{Hostname, HostnameError};
+pub use policy::Policy;
