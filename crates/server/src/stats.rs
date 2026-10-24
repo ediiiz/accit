@@ -30,6 +30,9 @@ impl Window {
 
     fn record(&self, second: u64) {
         let _ = self.slot(second).fetch_update(Ordering::Relaxed, Ordering::Relaxed, |slot| {
+            if slot >> COUNT_BITS > second {
+                return None;
+            }
             let count = if slot >> COUNT_BITS == second { (slot & COUNT_MASK).saturating_add(1) } else { 1 };
 
             Some(second << COUNT_BITS | count.min(COUNT_MASK))
@@ -104,7 +107,7 @@ impl fmt::Display for Status {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(formatter, "active grants: {}", self.active_grants)?;
         writeln!(formatter, "verifications per minute: {}", self.verifications_per_minute)?;
-        writeln!(formatter, "denials: {}", self.denials)
+        writeln!(formatter, "denials since start: {}", self.denials)
     }
 }
 
@@ -143,6 +146,15 @@ mod tests {
     }
 
     #[test]
+    fn a_late_decision_does_not_overwrite_a_newer_slot() {
+        let stats = Stats::new();
+        stats.record_at(Verdict::Pass, 65);
+        stats.record_at(Verdict::Pass, 5);
+
+        assert_eq!(per_minute(&stats, 65), 1);
+    }
+
+    #[test]
     fn denials_are_a_total_and_do_not_age_out() {
         let stats = Stats::new();
         stats.record_at(Verdict::Pass, 0);
@@ -157,6 +169,9 @@ mod tests {
     fn status_prints_one_line_per_counter() {
         let status = Status { active_grants: 3, verifications_per_minute: 12, denials: 4 };
 
-        assert_eq!(status.to_string(), "active grants: 3\nverifications per minute: 12\ndenials: 4\n");
+        assert_eq!(
+            status.to_string(),
+            "active grants: 3\nverifications per minute: 12\ndenials since start: 4\n"
+        );
     }
 }

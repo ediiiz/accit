@@ -17,18 +17,19 @@ const USAGE: &str = "Usage: accit [command]
 
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
-  admin reload  Reload the Policy in the running daemon (as SIGHUP does).
   admin list    Active Grants: Address and expiry.
   admin revoke <address>
                 Revoke the Grant of one Address.
   admin revoke-all
                 Revoke every Grant.
+  admin reload  Reload the Policy in the running daemon (as SIGHUP does).
+  admin status  Active Grants, verifications per minute and denials since start.
   admin recover --discard-grants | --keep-grants
-                Leave the failed-closed state, deleting (recommended) or keeping the stored Grants.
-  admin status  Active Grants, verifications per minute and denials.
+                Leave the failed-closed state. --discard-grants deletes the stored Grants
+                (recommended). --keep-grants keeps them, and may restore a Grant whose Revoke failed.
   admin check [file]
                 Validate a config without applying it (default: the running config):
-                coverage, warnings, client CA expiry.
+                coverage, warnings, client CA expiry. Runs here, not in the daemon.
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
@@ -97,8 +98,8 @@ async fn admin(args: &[String]) -> Result<()> {
     Ok(std::io::stdout().write_all(answer.as_bytes())?)
 }
 
-fn help() {
-    tracing::info!("{USAGE}");
+fn help() -> Result<()> {
+    Ok(writeln!(std::io::stdout(), "{USAGE}")?)
 }
 
 pub async fn run(args: &[String]) -> Result<()> {
@@ -109,10 +110,7 @@ pub async fn run(args: &[String]) -> Result<()> {
         "serve" => serve().await,
         "admin" => admin(rest).await,
         "healthcheck" => healthcheck(&Config::load(&config::path_from_env())?).await,
-        "-h" | "--help" | "help" => {
-            help();
-            Ok(())
-        }
+        "-h" | "--help" | "help" => help(),
         _ => bail!("unknown command {command:?}\n\n{USAGE}"),
     }
 }
