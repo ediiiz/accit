@@ -39,18 +39,51 @@ COPY --from=web-deps /app/ ./
 COPY --from=web-pruner /app/out/full/ ./
 RUN bunx turbo@${TURBO_VERSION} run build --filter=web
 
-FROM ${RUST_IMAGE} AS server
+# Cross-compiles on the build host: the arm64 image needs no emulation.
+FROM --platform=$BUILDPLATFORM ${RUST_IMAGE} AS server
+ARG BUILDARCH
+ARG TARGETARCH
+# cargo-auditable embeds the crate list in the binary, so image scanners see the dependencies.
+ARG CARGO_AUDITABLE_VERSION=0.7.7
 WORKDIR /src
 # sqlx macros use the checked-in query cache (crates/store/.sqlx).
 ENV SQLX_OFFLINE=true
+RUN <<'EOT'
+set -eu
+host=$(uname -m)-unknown-linux-gnu
+file=cargo-auditable-$host.tar.xz
+curl -fsSL -o "/tmp/$file" "https://github.com/rust-secure-code/cargo-auditable/releases/download/v${CARGO_AUDITABLE_VERSION}/$file"
+grep " $file\$" > /tmp/auditable.sha256 <<'SUMS'
+4c8d3b08c3c34e9f2333367224dbbfb4aab68067698b43de59fe19aded3416dd  cargo-auditable-x86_64-unknown-linux-gnu.tar.xz
+bcb2d46002a8dd8e94d0d669cb39d38c9651db2ae5d1f3f1f1bab516ee1e212c  cargo-auditable-aarch64-unknown-linux-gnu.tar.xz
+SUMS
+(cd /tmp && sha256sum -c auditable.sha256)
+tar -xJf "/tmp/$file" --strip-components=1 -C /usr/local/cargo/bin "cargo-auditable-$host/cargo-auditable"
+rm "/tmp/$file" /tmp/auditable.sha256
+EOT
 COPY Cargo.toml Cargo.lock clippy.toml rustfmt.toml ./
 COPY crates crates
 # rust-embed reads this folder at compile time.
 COPY --from=web /app/apps/web/build apps/web/build
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p server \
-    && cp target/release/accit /accit
+    --mount=type=cache,target=/src/target <<'EOT'
+set -eu
+case "$TARGETARCH" in
+  amd64) triple=x86_64-unknown-linux-gnu gcc=x86-64-linux-gnu ;;
+  arm64) triple=aarch64-unknown-linux-gnu gcc=aarch64-linux-gnu ;;
+  *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;;
+esac
+if [ "$BUILDARCH" != "$TARGETARCH" ]; then
+  apt-get update
+  apt-get install -y --no-install-recommends "gcc-$gcc" "libc6-dev-$TARGETARCH-cross"
+  # The linker, and the C compiler for bundled SQLite.
+  export "CARGO_TARGET_$(echo "$triple" | tr 'a-z-' 'A-Z_')_LINKER=$gcc-gcc"
+  export "CC_$(echo "$triple" | tr - _)=$gcc-gcc"
+fi
+rustup target add "$triple"
+cargo auditable build --release --locked -p server --target "$triple"
+cp "target/$triple/release/accit" /accit
+EOT
 
 # glibc, CA certificates, a nonroot user; no shell, no package manager.
 FROM ${RUNTIME_IMAGE} AS runner

@@ -20,16 +20,15 @@ computed and the image built in one job, so a failed build never publishes a tag
    runs one job that, in order:
    - computes the next version from commits since the last `v*` tag
      (`feat` → minor, `fix`/`perf`/etc → patch, breaking → major),
-   - scans dependencies (`scripts/audit`, cargo-deny policy) and checks the Portal's
-     150 KiB budget,
-   - builds and pushes the multi-arch (amd64, arm64) single-container image to GHCR tagged
-     with that version (plus `latest` and `sha-<sha>`), with provenance and an SBOM,
-   - checks the image size budget, scans the pushed image with Trivy and generates an SPDX
-     SBOM, then
+   - scans dependencies (`scripts/audit`: cargo-deny advisories, `bun audit`),
+   - builds and pushes the multi-arch (amd64, arm64) single-container image to GHCR as
+     `sha-<sha>` only, cross-compiled and with provenance and an SBOM,
+   - scans that image with Trivy and extracts its SPDX SBOM,
+   - adds the `latest` and version tags, then
    - pushes the `vX.Y.Z` tag and creates a GitHub release with generated notes and the SBOM attached.
 
-The image build happens **before** the tag/release steps and gates them: if the
-build fails, the job aborts and no tag or release is published. There is no
+The checks and the image build happen **before** the tag/release steps and gate them: if one
+fails, the job aborts and no tag or release is published. There is no
 separate build-image workflow, and no `RELEASE_TOKEN` is needed — nothing keys
 off a tag-push event, so the automatic `GITHUB_TOKEN` pushes the tag.
 

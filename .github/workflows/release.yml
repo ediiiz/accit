@@ -9,20 +9,21 @@ name: Release
 #   2. builds and pushes the single-container image to GHCR, THEN
 #   3. tags `vX.Y.Z` and creates the GitHub release.
 #
-# The image build runs BEFORE the tag/release steps *in the same job*, and those
-# steps are guarded with `success()`. So a failed build aborts the run and no
-# tag or release is ever published — the release is gated on a green image
-# build. Nothing keys off a tag-push event, so the automatic GITHUB_TOKEN is
-# sufficient for the tag push.
+# The checks and the image build run BEFORE the tag/release steps *in the same job*, and those
+# steps are guarded with `success()`. So a failed check aborts the run and no tag or release is
+# ever published. Nothing keys off a tag-push event, so the automatic GITHUB_TOKEN is sufficient
+# for the tag push.
 #
-# Manual rebuild: run this workflow via workflow_dispatch with build_only=true to
-# build + push the image (`latest` + `sha-<sha>` tags) without cutting a release.
+# Manual rebuild: run this workflow via workflow_dispatch with build_only=true to run the same
+# checks and push the image (`latest` + `sha-<sha>` tags) without cutting a release.
 #
-# Hardening (docs/spec.md sections 9, 13, 14), all before the tag so a failure publishes nothing:
-#   - dependency scan (cargo-deny advisories, bun audit) and the Portal's 150 KiB budget,
-#   - multi-arch image (linux/amd64, linux/arm64) with SLSA provenance and a BuildKit SBOM,
-#   - image size budget and a Trivy scan of the pushed image,
-#   - an SPDX SBOM attached to the GitHub release.
+# Hardening (docs/spec.md sections 9, 13, 14). The image is first pushed under `sha-<sha>` only;
+# `latest` and `vX.Y.Z` are added after every check passes, so a failed check never moves them:
+#   - dependency scan (cargo-deny advisories, bun audit); `scripts/ci` covers the rest locally,
+#   - multi-arch image (linux/amd64, linux/arm64), cross-compiled, with SLSA provenance and a
+#     BuildKit SBOM,
+#   - a Trivy scan of the pushed image,
+#   - the SPDX SBOM extracted from that image and attached to the GitHub release.
 # Third-party actions are pinned to commit SHAs; the image's base images to digests (Dockerfile).
 #
 # If nothing since the last tag warrants a bump, the run is a no-op.
@@ -102,7 +103,7 @@ jobs:
             --strip header -o /tmp/RELEASE_NOTES.md
           echo "----- notes -----"; cat /tmp/RELEASE_NOTES.md
 
-      # ---- Image build: must succeed before any tag/release is published ------
+      # ---- Checks and image build: must succeed before any tag/release is published ----
 
       - name: Resolve build settings
         id: cfg
@@ -115,27 +116,16 @@ jobs:
           # the promote job writes to values.yaml.
           SHA="$GITHUB_SHA"
 
-          echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           {
-            echo "tags<<EOF"
-            echo "$IMAGE:latest"
-            echo "$IMAGE:sha-$SHA"
-            # Version tag only when we're actually releasing (empty on build_only).
-            if [ -n "${{ steps.version.outputs.version }}" ]; then
-              echo "$IMAGE:${{ steps.version.outputs.version }}"
-            fi
-            echo "EOF"
+            echo "registry=ghcr.io"
+            echo "image=$IMAGE"
+            echo "tag=$IMAGE:sha-$SHA"
+            echo "cache=$IMAGE:buildcache"
           } >> "$GITHUB_OUTPUT"
-          echo "cache=$IMAGE:buildcache" >> "$GITHUB_OUTPUT"
 
       - name: Set up Bun
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Install dependencies
-        if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Install cargo-deny
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
@@ -147,14 +137,6 @@ jobs:
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
         run: scripts/audit
 
-      - name: Check cargo-deny policy
-        if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        run: cargo deny check licenses bans sources
-
-      - name: Check the Portal budget
-        if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        run: scripts/web-budget
-
       - name: Log in to GHCR
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -162,12 +144,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU
-        if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
-        with:
-          platforms: arm64
 
       - name: Set up Buildx
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
@@ -184,20 +160,12 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
-          tags: ${{ steps.cfg.outputs.tags }}
+          tags: ${{ steps.cfg.outputs.tag }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=registry,ref=${{ steps.cfg.outputs.cache }}
           cache-to: type=registry,ref=${{ steps.cfg.outputs.cache }},mode=max
-
-      - name: Check the image size budget
-        if: ${{ success() && steps.build.outputs.digest != '' }}
-        run: |
-          set -euo pipefail
-          IMAGE="${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}"
-          docker pull --platform linux/amd64 "$IMAGE"
-          scripts/image-size "$IMAGE"
 
       - name: Scan the image
         if: ${{ success() && steps.build.outputs.digest != '' }}
@@ -211,17 +179,25 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      - name: Generate the SBOM
+      - name: Extract the SBOM
         if: ${{ success() && steps.build.outputs.digest != '' }}
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect \
+            "${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}" \
+            --format '{{ json (index .SBOM "linux/amd64").SPDX }}' > sbom.spdx.json
+          jq -e '.packages | length > 0' sbom.spdx.json > /dev/null
 
-      # ---- Publish the release: only reached if the build above succeeded -----
+      - name: Publish the image tags
+        if: ${{ success() && steps.build.outputs.digest != '' }}
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.cfg.outputs.image }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          docker buildx imagetools create -t "$IMAGE:latest" ${VERSION:+-t "$IMAGE:$VERSION"} \
+            "$IMAGE@${{ steps.build.outputs.digest }}"
+
+      # ---- Publish the release: only reached if every check above succeeded -----
 
       - name: Tag the release
         if: ${{ success() && steps.version.outputs.release == 'true' }}

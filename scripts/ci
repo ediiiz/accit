@@ -17,11 +17,11 @@ step "rust gate"
 scripts/check-rust
 step "supply chain policy"
 # Licenses, bans and sources work offline; advisories need the network (scripts/audit).
-if command -v cargo-deny >/dev/null 2>&1; then
-  cargo deny check licenses bans sources
-else
-  echo "cargo-deny not installed: skipped (cargo install cargo-deny --locked)"
+if ! command -v cargo-deny >/dev/null 2>&1; then
+  echo "cargo-deny not installed: cargo install cargo-deny --locked" >&2
+  exit 1
 fi
+cargo deny check licenses bans sources
 step "lint"
 bun run lint
 step "format"
