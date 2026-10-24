@@ -1,0 +1,33 @@
+#!/bin/sh
+# Rebuilds the printable onboarding guides (docs/guides/onboarding.*.pdf) from their Markdown.
+# Needs network access for `bunx marked` and a headless Chrome ($CHROME, default google-chrome).
+# The PDFs are committed; Chrome embeds a creation date, so rebuilds are never byte-identical and
+# CI does not compare them.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+chrome=${CHROME:-google-chrome}
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+for lang in en de; do
+  guide=$root/docs/guides/onboarding.$lang
+  {
+    printf '<!doctype html><html lang="%s"><meta charset="utf-8"><style>' "$lang"
+    cat <<'CSS'
+@page { size: A4; margin: 18mm; }
+body { font: 11pt/1.45 system-ui, "DejaVu Sans", sans-serif; color: #111; }
+h1 { font-size: 20pt; margin: 0 0 4mm; }
+h2 { font-size: 14pt; margin: 6mm 0 2mm; break-after: avoid; }
+h3 { font-size: 11.5pt; margin: 4mm 0 1mm; break-after: avoid; }
+code { font: 10pt "DejaVu Sans Mono", monospace; }
+table { border-collapse: collapse; width: 100%; break-inside: avoid; }
+th, td { border: 1px solid #888; padding: 1.5mm 2mm; text-align: left; vertical-align: top; }
+li { margin: 0.5mm 0; }
+CSS
+    printf '</style><body>'
+    bunx marked@16.4.1 "$guide.md"
+  } >"$work/$lang.html"
+  "$chrome" --headless=new --no-sandbox --disable-gpu --no-pdf-header-footer \
+    --print-to-pdf="$guide.pdf" "file://$work/$lang.html" 2>/dev/null
+  echo "wrote $guide.pdf"
+done

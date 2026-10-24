@@ -140,9 +140,10 @@ One prerendered SvelteKit route, Paraglide (English, German; browser language, a
 - Traefik ≥ v3.7.16 (mTLS and ForwardAuth bypass fixes up to that release). The role checks the running version.
 - Entrypoint `websecure` gets one chain, `accit@file`:
   1. `headers` sets `X-Accit-Proxy-Token`.
-  2. `forwardAuth` to `http://<accit>:8081/verify` with `trustForwardHeader: false` and `authRequestHeaders: [X-Accit-Proxy-Token]`; no body forwarded.
+  2. `forwardAuth` to `http://<accit>:8081/verify` with `trustForwardHeader: false`, `authRequestHeaders: [X-Accit-Proxy-Token]` and `maxResponseBodySize: 4096` (accit's bodies are empty or the 9-byte `Forbidden`; an over-limit body would turn 403 into 401) **(changed)**; no body forwarded.
   3. `headers` deletes `X-Accit-Proxy-Token`.
 - The Portal router: exact `Host` rule, its own TLS options with `RequireAndVerifyClientCert` and the dedicated client CA, and a `headers` middleware that sets the token again for the Portal listener.
+- `entryPoints.websecure.http.aliasHeadersStrategy: delete`, overridable and affecting every app on that entrypoint: Traefik's header middlewares only touch canonical dash names, so `X_Accit_Proxy_Token` and `X_Forwarded_*` aliases would otherwise reach CGI, PHP, WSGI and NGINX backends **(changed)**.
 - `--core.strictTLSOptions=true`, so a conflicting router fails closed instead of silently dropping client authentication.
 - Dedicated Docker network `accit` with pinned addresses: Traefik joins it via `traefik_role_docker_networks_custom`; accit joins only this network. accit trusts exactly Traefik's pinned address.
 - No dynamic rewrites: Unlock, renew and Revoke never touch Traefik, Docker or the firewall.
