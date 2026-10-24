@@ -3,7 +3,8 @@ name: CI
 # Manual only: CI runs locally (scripts/ci) to keep Actions minutes at zero.
 # Start this by hand when a hosted run is wanted; it covers the Rust gate and
 # the Portal's lint, format, typecheck and unit tests. The e2e job builds the
-# image and runs the Compose harness (scripts/e2e).
+# image and runs the Compose harness (scripts/e2e) and the Portal's Playwright
+# suite through it (scripts/e2e-web).
 
 on:
   workflow_dispatch:
@@ -93,5 +94,16 @@ jobs:
           key: cargo-e2e-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-e2e-
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
       - name: End-to-end suite
         run: scripts/e2e
+
+      - name: Portal suite
+        run: scripts/e2e-web

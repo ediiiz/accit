@@ -20,7 +20,7 @@ Dependencies flow one way: `access ← config ← server` and `access ← store 
 
 - Gate (run before every commit touching `crates/`): `scripts/check-rust`. It runs fmt, clippy `-D warnings`, the 300-line file cap, the sqlx query cache check and all tests.
 - Format: `scripts/cargo fmt`.
-- End-to-end: `scripts/e2e` (needs Docker; not part of the gate or `scripts/ci`).
+- End-to-end: `scripts/e2e`; the Portal in a browser: `scripts/e2e-web` (both need Docker; not part of the gate or `scripts/ci`).
 - Dev server: `bun run dev:server` (config `dev/accit.yaml`, `profile: test`).
 - SQL lives in `sqlx::query!` macros checked against the cache in `crates/store/.sqlx`; builds use it (`SQLX_OFFLINE=true`), and the gate fails when it is stale. Needs `sqlx-cli` 0.9 on the host (`cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features sqlite`; the `scripts/cargo` image has it).
 - New migration: `crates/store/migrations/NNNN_name.sql`, next number.
