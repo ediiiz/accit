@@ -15,13 +15,13 @@ accit is a network barrier in front of self-hosted apps (`../spec.md` section 1)
 | Moving the wall clock to extend a Grant                     | Each Grant also has a monotonic deadline; both must lie in the future. A drift over 5 minutes makes accit unready until restart (section 7).                   |
 | Traefik misconfiguration drops client authentication        | `--core.strictTLSOptions=true`: a conflicting router on the Portal host is disabled instead of falling back to TLS options without client authentication (10). |
 | A Revoke that could not be saved comes back after a restart | accit becomes unready (503 everywhere) and writes the `fail-closed` marker; it stays unready until `accit admin recover` (section 7).                          |
-| accit down or not ready                                     | Every host answers 503 or 403, never 2xx: the gate fails closed (ADR 0001).                                                                                    |
+| accit down or not ready                                     | Every host is refused, never 2xx: 503 from accit when not ready, 500 from Traefik's ForwardAuth when accit cannot be reached (ADR 0001).                       |
 
 ## What a leaked certificate allows
 
 The certificate and its password are the only secret a Credential holder has, and every holder has the same one. Whoever has both can open the Portal and Unlock their own Address, then reach the Gated hosts, still facing each app's login. Holders are indistinguishable by design; audit events record action, Address and time, never a person.
 
-There is no per-holder revocation and no CRL or OCSP. Responding means rotating the CA, which replaces the certificate for everyone (operator guide, incident procedure). The `.p12` is password-protected, and the CA private key never leaves the admin's machine: `scripts/client-ca` keeps it only while it runs.
+There is no per-holder revocation and no CRL or OCSP. Responding means rotating the CA, which replaces the certificate for everyone (operator guide, incident procedure). The `.p12` is password-protected, and the CA private key never exists in the image or a container: `scripts/client-ca` destroys it after signing.
 
 ## Failure behaviour (section 7)
 

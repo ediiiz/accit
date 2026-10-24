@@ -32,11 +32,11 @@ refuses() { # description, command...
 text() { openssl x509 -in "$1" -noout -text; }
 has() { grep -q -- "$1"; }
 
-# Seconds between notBefore and notAfter, rounded to whole days.
+# Whole days between notBefore and notAfter.
 validity_days() {
   start=$(openssl x509 -in "$1" -noout -startdate | cut -d= -f2)
   end=$(openssl x509 -in "$1" -noout -enddate | cut -d= -f2)
-  echo $(($(($(date -d "$end" +%s) - $(date -d "$start" +%s))) / 86400))
+  echo $((($(date -d "$end" +%s) - $(date -d "$start" +%s)) / 86400))
 }
 
 # Extracts the leaf from a .p12 into <prefix>.pem and <prefix>.key.
@@ -53,14 +53,26 @@ handshake() { # ca.pem, leaf.pem, leaf.key
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
       -subj "/CN=localhost" -keyout "$server_dir/server.key" -out "$server_dir/server.pem" 2>/dev/null
   fi
-  port=$((20000 + $$ % 20000 + ${PORT_OFFSET:-0}))
-  PORT_OFFSET=$((${PORT_OFFSET:-0} + 1))
-  openssl s_server -accept "127.0.0.1:$port" -cert "$server_dir/server.pem" -key "$server_dir/server.key" \
-    -CAfile "$1" -Verify 1 -verify_return_error -tls1_2 -naccept 1 -www >"$work/server.log" 2>&1 &
+  openssl s_server -accept 127.0.0.1:0 -cert "$server_dir/server.pem" -key "$server_dir/server.key" \
+    -CAfile "$1" -Verify 1 -verify_return_error -tls1_2 -www >"$work/server.log" 2>&1 &
   server_pid=$!
-  sleep 1
+  # The kernel picks the port and s_server logs it, but it logs before it listens: probe until a connect succeeds.
+  port=""
+  tries=0
+  while :; do
+    port=$(sed -n 's/^ACCEPT 127.0.0.1:\([0-9]*\)$/\1/p' "$work/server.log")
+    if [ -n "$port" ] && ! openssl s_client -connect "127.0.0.1:$port" </dev/null 2>&1 | grep -q 'errno=111'; then
+      break
+    fi
+    tries=$((tries + 1))
+    if ! kill -0 "$server_pid" 2>/dev/null || [ "$tries" -ge 100 ]; then
+      cat "$work/server.log" >&2
+      return 2
+    fi
+    sleep 0.1
+  done
   result=1
-  if { printf 'GET / HTTP/1.0\r\n\r\n'; sleep 1; } | openssl s_client -connect "127.0.0.1:$port" -tls1_2 -cert "$2" -key "$3" \
+  if printf 'GET / HTTP/1.0\r\n\r\n' | openssl s_client -connect "127.0.0.1:$port" -tls1_2 -cert "$2" -key "$3" \
     -CAfile "$server_dir/server.pem" -ign_eof 2>/dev/null | grep -q '^HTTP/1.0 200'; then result=0; fi
   kill "$server_pid" 2>/dev/null || true
   wait "$server_pid" 2>/dev/null || true

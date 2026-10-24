@@ -1,6 +1,6 @@
 #!/bin/sh
-# Client CA and shared client certificate (docs/spec.md section 11). Run it on the admin's machine,
-# never on the server: the CA private key exists only in a temporary directory while this runs.
+# Client CA and shared client certificate (docs/spec.md section 11). The CA private key is never in
+# the image or a container: it exists only in a temporary directory while this runs, then it is destroyed.
 #
 #   scripts/client-ca create [dir]   new CA, one-year shared leaf, password-protected client.p12
 #   scripts/client-ca rotate [dir]   the same with a new CA; the old CA certificate moves to retired/
@@ -20,6 +20,14 @@ LEAF_DAYS=365
 CA_DAYS=366
 MIN_PASSWORD=12
 
+saved="" work="" staging=""
+cleanup() {
+  [ -z "$saved" ] || stty "$saved" 2>/dev/null || true
+  rm -rf "$work" "$staging"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM HUP
+
 die() {
   printf 'client-ca: %s\n' "$1" >&2
   exit 1
@@ -37,12 +45,12 @@ read_password() {
   [ -t 0 ] || die "no terminal: set ACCIT_P12_PASSWORD"
   printf 'Password for client.p12: ' >&2
   saved=$(stty -g)
-  trap 'stty "$saved"' EXIT
   stty -echo
-  read -r first
+  IFS= read -r first
   printf '\nRepeat: ' >&2
-  read -r second
+  IFS= read -r second
   stty "$saved"
+  saved=""
   printf '\n' >&2
   [ "$first" = "$second" ] || die "passwords differ"
   ACCIT_P12_PASSWORD=$first
@@ -101,7 +109,6 @@ work=$(mktemp -d "$secret_root/client-ca.XXXXXX")
 parent=$(dirname "$dir")
 mkdir -p "$parent"
 staging=$(mktemp -d "$parent/.client-ca.XXXXXX")
-trap 'rm -rf "$work" "$staging"' EXIT
 
 issue "$staging"
 

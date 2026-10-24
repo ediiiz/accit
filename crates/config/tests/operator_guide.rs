@@ -1,7 +1,7 @@
 //! The production example in the operator guide (docs/guides/operator.md) must load, so the guide
 //! cannot drift from the schema.
 
-#![allow(clippy::unwrap_used, reason = "test fixtures: a failure here is a test bug")]
+#![allow(clippy::unwrap_used, clippy::expect_used, reason = "test fixtures: a failure here is a test bug")]
 
 mod common;
 
@@ -13,8 +13,11 @@ use common::{host, parse_with_file};
 fn example() -> String {
     let guide = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/guides/operator.md");
     let text = std::fs::read_to_string(guide).unwrap();
-    let start = text.find("```yaml\nprofile: production").unwrap() + "```yaml\n".len();
-    let length = text[start..].find("```").unwrap();
+    let start = text
+        .find("```yaml\nprofile: production")
+        .expect("operator guide has no ```yaml block starting with `profile: production`")
+        + "```yaml\n".len();
+    let length = text[start..].find("```").expect("operator guide's production YAML block is not closed");
 
     text[start..start + length].to_owned()
 }

@@ -2,16 +2,16 @@
 
 For the person who runs accit next to Traefik and Docker. Spec: `../spec.md`. Terms: `../../GLOSSARY.md`. Threat model and limits: `threat-model.md`. Holder instructions: `onboarding.en.md`, `onboarding.de.md`.
 
-The steps are generic Traefik v3.7.16 or later on Docker. A Saltbox role is a later milestone. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. Nothing here was run on real devices or a production host; the harness is what `scripts/e2e` exercises.
+The steps are generic Traefik v3.7.16 or later on Docker. A Saltbox role is a later milestone. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. Nothing here was run on real devices or a production host; the harness is what `scripts/e2e` exercises. Its `traefik/traefik.yml` is a test file: do not copy its `api.insecure` or its `:8080` entrypoint (section 3).
 
 ## Secrets
 
-| Secret                                           | Where it lives                                        | Never                       |
-| ------------------------------------------------ | ----------------------------------------------------- | --------------------------- |
-| Proxy token (`proxy-token`)                      | accit's config directory, and in Traefik's chain file | in git, chat, logs          |
-| Rendered Traefik chain file (contains the token) | Traefik's dynamic directory                           | in git                      |
-| `client.p12` and its password                    | the admin's machine, then the holders                 | together, or in git         |
-| CA private key                                   | nowhere: `scripts/client-ca` deletes it after use     | on the server, in the image |
+| Secret                                           | Where it lives                                         | Never                       |
+| ------------------------------------------------ | ------------------------------------------------------ | --------------------------- |
+| Proxy token (`proxy-token`)                      | accit's config directory, and in Traefik's chain file  | in git, chat, logs          |
+| Rendered Traefik chain file (contains the token) | Traefik's dynamic directory                            | in git                      |
+| `client.p12` and its password                    | the admin's machine, then the holders                  | together, or in git         |
+| CA private key                                   | nowhere: `scripts/client-ca` destroys it after signing | in the image or a container |
 
 Commit templates with placeholders only. `.gitignore` already excludes `client-ca/` and `*.p12`.
 
@@ -22,6 +22,8 @@ On your own machine, not the server:
 ```sh
 scripts/client-ca create client-ca    # asks for a password of at least 12 characters
 ```
+
+**Not verified on devices.** The `.p12` uses a legacy encoding (PBE-SHA1-3DES, SHA-1 MAC) chosen for Apple and older Android importers, and the import steps in the onboarding guides were not run on hardware. Import it on one Android phone and one iPhone before handing it out; a failure affects every holder.
 
 This writes `client-ca/ca.pem` (public) and `client-ca/client.p12`. The shared leaf is valid for 365 days and the CA for 366, so accit's warning (30 days before the CA expires) also precedes the leaf's expiry. The command prints the CA fingerprint and both expiry dates. Set `ACCIT_P12_PASSWORD` instead of the prompt for scripted use.
 
@@ -63,7 +65,7 @@ Publish no ports on accit. The data directory must be writable by uid 65532: `mk
 
 ## 3. Traefik
 
-Static configuration (`harness/traefik/traefik.yml` has the full file):
+Static configuration. Keep the Traefik API off (`api.insecure`) or bound away from app networks: its dynamic configuration contains the proxy token.
 
 ```yaml
 core:
@@ -73,12 +75,15 @@ entryPoints:
     address: ":443"
     http:
       middlewares: [accit@file]
+      aliasHeadersStrategy: delete # affects every app on this entrypoint
       tls: {}
 ```
 
+`aliasHeadersStrategy: delete` drops underscore aliases such as `X_Accit_Proxy_Token` and `X_Forwarded_For`. Traefik's header middlewares only handle the dash names, so otherwise CGI, PHP, WSGI and NGINX backends would receive them.
+
 Dynamic file `accit.yml`, from the harness template `harness/traefik/accit.yml.in`. Replace the hostname, the accit address and the Portal certificate setting for your site:
 
-- Chain `accit`: `headers` sets `X-Accit-Proxy-Token`, `forwardAuth` calls `http://172.29.20.3:8081/verify` with `trustForwardHeader: false` and `authRequestHeaders: [X-Accit-Proxy-Token]`, a second `headers` deletes the token.
+- Chain `accit`: `headers` sets `X-Accit-Proxy-Token`, `forwardAuth` calls `http://172.29.20.3:8081/verify` with `trustForwardHeader: false`, `authRequestHeaders: [X-Accit-Proxy-Token]` and `maxResponseBodySize: 4096`, a second `headers` deletes the token.
 - Router `portal`: rule ``Host(`portal.example.com`)``, middleware `accit-set-token`, service `http://172.29.20.3:8080`, `tls.options: mtls`, plus your certificate resolver.
 - TLS option `mtls`: `clientAuthType: RequireAndVerifyClientCert`, `caFiles: [/certs/client-ca.pem]` (the `ca.pem` from section 1), `minVersion: VersionTLS12`.
 
@@ -87,7 +92,7 @@ Generate the token once and render the chain file; keep both out of git:
 ```sh
 umask 077
 openssl rand -hex 32 > accit/config/proxy-token
-sed "s/__PROXY_TOKEN__/$(cat accit/config/proxy-token)/" accit.yml.in > traefik/dynamic/accit.yml
+awk 'NR==FNR { token = $0; next } { gsub(/__PROXY_TOKEN__/, token) } 1' accit/config/proxy-token accit.yml.in > traefik/dynamic/accit.yml
 chown 65532:65532 accit/config/proxy-token
 ```
 
@@ -191,7 +196,7 @@ Restore, **discarding Grants** (default). A restored database can hold Grants th
 2. Put the backup at `accit/data/accit.db`; remove `accit.db-wal` and `accit.db-shm` beside it; `chown 65532:65532` the files.
 3. Create the marker: `touch accit/data/fail-closed`.
 4. `docker start accit`. It stays unready (503 on every host) while the marker exists.
-5. `docker exec accit /accit admin recover --discard-grants`. Holders Enable access again.
+5. `docker exec accit /accit admin recover --discard-grants`. Credential holders Unlock again.
 
 `--keep-grants` instead keeps the stored Grants and may bring back one whose Revoke failed. Use it only when you know nothing was Revoked since the backup.
 
@@ -203,7 +208,7 @@ Goal: every old certificate stops working, every Grant ends, and open connection
 
 1. **Rotate the CA** on your machine: `scripts/client-ca rotate client-ca`. Do not serve the retired CA alongside the new one.
 2. **Install the new `ca.pem`** as Traefik's client CA file and as accit's `client_ca_file`, replacing the old one.
-3. **Close Portal connections.** Restart Traefik: `docker restart traefik`. A restart is the sure way to apply the new CA file and to end established connections, including any Portal session opened with the old certificate.
+3. **Close Portal connections.** Restart Traefik: `docker restart traefik`. A restart should apply the new CA file and end every established connection. Not verified against Traefik: step 5 confirms it, because the old `.p12` must be refused.
 4. **Revoke all Grants:** `docker exec accit /accit admin revoke-all`. Confirm with `admin list`.
 5. **Check:** `docker exec accit /accit admin check` shows the new CA's expiry, and the old `client.p12` no longer opens the Portal.
 6. **Redistribute** the new `client.p12` and its password by separate routes, and delete the old `.p12` files and `client-ca/retired/`.

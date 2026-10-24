@@ -9,6 +9,7 @@ http:
       forwardAuth:
         address: http://10.89.20.3:8081/verify
         trustForwardHeader: false
+        maxResponseBodySize: 4096
         authRequestHeaders:
           - X-Accit-Proxy-Token
     accit-delete-token:
