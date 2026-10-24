@@ -1,15 +1,13 @@
 # Agent factory
 
-> **Not usable yet for accit.** The slot tooling (`scripts/factory/slots.py`) still gives each slot its own Postgres database, and the agent prompts still mention `sqlx prepare` and `api:generate`. accit uses SQLite files and no generated client. Rework the slots before running `/loop /factory`.
-
-Implements the V1 tickets unattended: one Claude Code session runs `/loop /factory`, dispatches background agents, and lands their PRs on `staging` after automated review, integration and CI.
+Implements the v1 tickets (`docs/spec.md`, GitHub milestone "v1 core") unattended: one Claude Code session runs `/loop /factory`, dispatches background agents, and lands their PRs on `staging` after automated review, integration and CI.
 
 ## Pipeline
 
 ```text
 frontier ─▶ triage (Haiku) ─▶ implementer (Sonnet │ Opus for deep) ─▶ PR [factory:review]
         ─▶ spec reviewer (Opus) ‖ standards reviewer (Sonnet) ─▶ [factory:approved] or [factory:changes] ─▶ fix
-        ─▶ golden guard ─▶ integrator (Sonnet, merge slot) ─▶ [factory:merging] ─▶ CI green ─▶ merge, issue closed
+        ─▶ integrator (Sonnet, merge slot) ─▶ [factory:merging] ─▶ CI green ─▶ merge, issue closed
 oversized ticket ─▶ splitter (Opus) ─▶ child tickets back into the frontier
 ```
 
@@ -27,20 +25,21 @@ oversized ticket ─▶ splitter (Opus) ─▶ child tickets back into the front
 
 ## Build slots and disk
 
-Builds run only in a fixed pool of **slots** under `.factory/slots/` (`impl-1…3`, `merge-1`): reused worktrees, each with a warm `target/`, its own database `factory_<slot>` and `node_modules`. A ticket never gets a fresh worktree, so disk is bounded by slots × cap instead of tickets × build.
+Builds run only in a fixed pool of **slots** under `.factory/slots/` (`impl-1…3`, `merge-1`): reused git worktrees with their own `node_modules`. Every agent works in the slot it was handed and nowhere else.
 
 | Control                 | Setting                                                                                                                                |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Smaller builds in slots | `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only`, `CARGO_BUILD_JOBS=3` (passed through `scripts/cargo`)        |
-| On every slot release   | drop leftover `#[sqlx::test]` databases, delete `target/debug/incremental`, delete `target/` when above `slot_target_cap_gb` (12)      |
+| Toolchain               | the host's `cargo` (`cargo` in `scripts/factory/config.json`; the slot env exports it as `CARGO`, which `scripts/check-rust` uses)     |
+| Smaller builds in slots | `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_{DEV,TEST}_DEBUG=line-tables-only`, `CARGO_BUILD_JOBS=2`                                         |
+| After every agent       | `factory release <slot>` runs `cargo clean` in the slot and removes `target/`                                                          |
 | Each tick               | free disk below `disk_pause_free_gb` (30): `gc`, no new tickets · below `disk_critical_free_gb` (15): `gc --aggressive`, no build work |
-| `gc`                    | shrinks idle slots, prunes worktrees, deletes merged `factory/*` branches, `docker image prune`                                        |
+| `gc`                    | cleans idle slots, prunes worktrees, deletes merged `factory/*` branches, `docker image prune`                                         |
 
-Never deleted: the Postgres volume (`docker volume rm`/`system prune` are denied), your own checkouts and their `target/`.
+Never deleted: your own checkouts and their `target/`.
 
 ## Setup (once)
 
-1. Postgres running: `docker compose -f docker/compose.yml up -d` (container `app-pg`, see `scripts/factory/config.json`).
+1. `cargo` (Rust 1.97) and `bun` on the host.
 2. `gh auth status` shows a login for the configured host (the factory reads the API token via `gh auth token`).
 3. `scripts/factory/factory setup` creates the `factory:*` labels.
 4. CI: with runners picking up pull requests (`rust.yml`, `check.yml`) keep `require_ci: true`. Without CI set `require_ci: false` in `scripts/factory/config.json`; the integrator's local gates are then the only gate. Either way `factory merge` refuses a branch that does not contain the current `staging` tip and sends it back to `approved` for re-integration, so what merges is what was tested.
@@ -63,10 +62,10 @@ then `/loop /factory`. The session stays open; `/loop` is session-scoped and exp
 
 ## Tuning (`scripts/factory/config.json`)
 
-| Key                    | Default                                  | Raise when                                     |
-| ---------------------- | ---------------------------------------- | ---------------------------------------------- |
-| `slots.impl`           | 3                                        | more cores and ~15 GB free disk per extra slot |
-| `cargo_build_jobs`     | 3                                        | fewer slots (keep slots × jobs ≈ cores)        |
-| `max_parallel_reviews` | 4                                        | reviews queue up                               |
-| `max_attempts`         | 3                                        | —                                              |
-| `golden_paths`         | `golden`, `/fixtures/`, `/oracle/cases/` | oracle tickets settle the fixture layout       |
+| Key                    | Default                   | Raise when                                     |
+| ---------------------- | ------------------------- | ---------------------------------------------- |
+| `slots.impl`           | 3                         | more cores and ~15 GB free disk per extra slot |
+| `cargo_build_jobs`     | 2                         | fewer slots (keep slots × jobs ≈ cores)        |
+| `max_parallel_reviews` | 4                         | reviews queue up                               |
+| `max_attempts`         | 3                         | —                                              |
+| `migrations`           | `crates/store/migrations` | the store crate moves (`factory renumber`)     |

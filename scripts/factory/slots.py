@@ -1,7 +1,7 @@
 """Persistent build slots, shared state and disk control.
 
-A slot is a reused git worktree with its own Postgres database and a warm Rust target dir.
-Reuse keeps builds incremental across tickets and bounds disk to (slots × cap)."""
+A slot is a reused git worktree (and its node_modules). Every release runs `cargo clean` in it,
+so no build output outlives the agent that made it; disk is bounded by the agents running at once."""
 
 import contextlib
 import fcntl
@@ -55,43 +55,15 @@ class Store:
     def slot_path(self, slot):
         return self.dir / "slots" / slot
 
-    def db_name(self, slot):
-        return "factory_" + slot.replace("-", "_")
-
     def env(self, slot):
         return {
-            "DATABASE_URL": f"postgres://app:app@127.0.0.1:5432/{self.db_name(slot)}",
+            "CARGO": self.cfg["cargo"],
             "CARGO_INCREMENTAL": "0",
             "CARGO_PROFILE_DEV_DEBUG": "line-tables-only",
             "CARGO_PROFILE_TEST_DEBUG": "line-tables-only",
             "CARGO_BUILD_JOBS": str(self.cfg["cargo_build_jobs"]),
             "FACTORY_SLOT": slot,
         }
-
-
-def psql(cfg, sql, db="app"):
-    return sh("docker", "exec", cfg["postgres_container"], "psql", "-U", cfg["postgres_user"], "-d", db,
-              "-tAc", sql)
-
-
-def ensure_db(store, slot, reset=False):
-    name = store.db_name(slot)
-    if reset:
-        drop_test_dbs(store, slot)
-        psql(store.cfg, f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-    if not psql(store.cfg, f"SELECT 1 FROM pg_database WHERE datname = '{name}'"):
-        psql(store.cfg, f'CREATE DATABASE "{name}"')
-
-
-def drop_test_dbs(store, slot):
-    """Databases #[sqlx::test] left behind (failed tests keep theirs)."""
-    name = store.db_name(slot)
-    res = subprocess.run(["docker", "exec", store.cfg["postgres_container"], "psql", "-U",
-                          store.cfg["postgres_user"], "-d", name, "-tAc",
-                          "SELECT db_name FROM _sqlx_test.databases"], capture_output=True, text=True)
-    for db in res.stdout.split() if res.returncode == 0 else []:
-        psql(store.cfg, f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
-        psql(store.cfg, f"DELETE FROM _sqlx_test.databases WHERE db_name = '{db}'", db=name)
 
 
 def prepare(store, slot, branch, new_branch=False):
@@ -110,7 +82,6 @@ def prepare(store, slot, branch, new_branch=False):
         sh("git", "switch", "-q", "-C", branch, f"origin/{branch}", cwd=path)
     env_file = store.dir / "slots" / f"{slot}.env"
     env_file.write_text("".join(f"export {k}={v}\n" for k, v in store.env(slot).items()))
-    ensure_db(store, slot)
     if not (path / "node_modules").exists():
         sh("bun", "install", "--frozen-lockfile", cwd=path)
     return {"slot": slot, "path": str(path), "env": str(env_file), "branch": branch}
@@ -131,15 +102,12 @@ def disk(store):
 
 
 def clean_slot(store, slot, aggressive=False):
-    """Shrink an idle slot: drop leftover test DBs, incremental cache, and the target dir over cap."""
+    """After every agent: `cargo clean` in the slot, so its target dir is gone."""
     path = store.slot_path(slot)
-    drop_test_dbs(store, slot)
-    shutil.rmtree(path / "target" / "debug" / "incremental", ignore_errors=True)
     size = dir_size(path / "target")
-    if aggressive or size > store.cfg["slot_target_cap_gb"] * GB:
-        shutil.rmtree(path / "target", ignore_errors=True)
-        return {"slot": slot, "target_gb": round(size / GB, 1), "action": "target removed"}
-    return {"slot": slot, "target_gb": round(size / GB, 1), "action": "kept"}
+    sh(store.cfg["cargo"], "clean", cwd=path, check=False)
+    shutil.rmtree(path / "target", ignore_errors=True)
+    return {"slot": slot, "target_gb": round(size / GB, 1), "action": "cargo clean"}
 
 
 def gc(store, state, aggressive=False):
