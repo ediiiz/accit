@@ -165,8 +165,7 @@ impl Stack {
         Ok(output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned()))
     }
 
-    /// Base config, no conflicting router, a fresh accit (no Grants, no sessions, no rate budget),
-    /// and a Portal reachable through the whole chain.
+    /// Base config, no conflicting router, a fresh accit, Portal reachable.
     fn reset(&self) -> Result<()> {
         self.remove_conflicting_router()?;
         self.set_config(&self.base_config()?)?;

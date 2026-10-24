@@ -50,9 +50,9 @@ fn spoofed_forwarding_headers_and_host_do_not_pass() -> Result<()> {
     let rewritten = stack.call(ADDRESS_B, OPEN, "/").header("Host", GATED).send()?;
 
     assert!(control.reached_app(), "control: {control:?}");
-    assert!(!address.reached_app(), "{address:?}");
-    assert!(!host.reached_app(), "{host:?}");
-    assert!(!rewritten.reached_app(), "{rewritten:?}");
+    assert_eq!(address.status(), Some(403), "{address:?}");
+    assert_eq!(host.status(), Some(403), "{host:?}");
+    assert_eq!(rewritten.status(), Some(403), "{rewritten:?}");
 
     Ok(())
 }

@@ -1,7 +1,6 @@
 #!/bin/sh
-# Writes everything the Compose harness mounts into harness/run/ (gitignored): a throwaway PKI,
-# the proxy token and the configs. Runs fresh each time. Test material only; modes are loose so
-# the nonroot accit user can read its files.
+# Writes what the Compose harness mounts into harness/run/ (gitignored): throwaway PKI, proxy token,
+# configs. Modes are loose so the nonroot accit user can read them.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 run=$here/run

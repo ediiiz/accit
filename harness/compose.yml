@@ -31,7 +31,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs:
-      - /data:uid=65532,gid=65532,mode=0700
+      - /data:size=16m,uid=65532,gid=65532,mode=0700
     volumes:
       - ./run/accit:/config:ro
     healthcheck:
@@ -62,7 +62,7 @@ services:
     image: accit-e2e-client:local
     cap_add: [NET_ADMIN]
     environment:
-      SOURCE_ADDRESSES: "10.89.10.11 10.89.10.12 10.89.10.13"
+      SOURCE_ADDRESSES: "10.89.10.11 10.89.10.12"
     command:
       - sh
       - -eu
@@ -72,7 +72,7 @@ services:
         for address in $$SOURCE_ADDRESSES; do ip addr add "$$address/24" dev "$$dev"; done
         exec sleep infinity
     healthcheck:
-      test: ["CMD-SHELL", "ip -4 -o addr show | grep -q ' 10.89.10.13/'"]
+      test: ["CMD-SHELL", "ip -4 -o addr show | grep -q ' 10.89.10.12/'"]
       interval: 1s
       timeout: 3s
       retries: 30

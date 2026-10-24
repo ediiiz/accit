@@ -3,7 +3,7 @@
 Real Traefik in front of accit, for `crates/e2e`. Run it with `scripts/e2e` (needs a working Docker): it generates the test PKI and token (`harness/prepare`), starts the stack, runs the suite and removes the stack. Not part of `scripts/ci`.
 
 ```
- client (10.89.10.10-.13) ──► traefik ──► accit  (10.89.20.3, profile: test)
+ client (10.89.10.10-.12) ──► traefik ──► accit  (10.89.20.3, profile: test)
    edge 10.89.10.0/24         10.89.10.2   whoami-gated / whoami-open (10.89.30.3, .4)
                               10.89.20.2   (accit: 10.89.20.0/24, apps: 10.89.30.0/24, both internal)
 ```

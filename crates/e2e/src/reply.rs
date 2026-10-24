@@ -1,29 +1,19 @@
-//! What a request through Traefik came back with, read from `curl -i` or `wget -S` output.
+//! What a request through Traefik came back with: `curl -i` output, and the status line of `wget -S`.
 
 /// One HTTP response.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,
-    pub headers: Vec<(String, String)>,
     pub body: String,
 }
 
 impl Reply {
-    /// Reads `curl -i` output: a status line, headers, a blank line, the body.
+    /// Reads `curl -i` output.
     pub fn parse(output: &str) -> Option<Self> {
         let (head, body) = output.split_once("\r\n\r\n")?;
-        let mut lines = head.lines();
-        let status = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
-        let headers = lines
-            .filter_map(|line| line.split_once(':'))
-            .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
-            .collect();
+        let status = head.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
 
-        Some(Self { status, headers, body: body.to_owned() })
-    }
-
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(sent, _)| sent.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str())
+        Some(Self { status, body: body.to_owned() })
     }
 
     /// A string field of the JSON body.
@@ -46,13 +36,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_status_headers_and_body() {
+    fn parses_status_and_body() {
         let output = "HTTP/2 200 \r\ncontent-type: application/json\r\ncache-control: no-store\r\n\r\n{\"state\":\"none\"}";
 
         let reply = Reply::parse(output).unwrap();
 
         assert_eq!(reply.status, 200);
-        assert_eq!(reply.header("Cache-Control"), Some("no-store"));
         assert_eq!(reply.body, "{\"state\":\"none\"}");
     }
 
@@ -61,7 +50,7 @@ mod tests {
 
     #[test]
     fn reads_a_field_of_the_json_body() {
-        let reply = Reply { status: 200, headers: vec![], body: STATUS.to_owned() };
+        let reply = Reply { status: 200, body: STATUS.to_owned() };
 
         assert_eq!(reply.field("csrf_token").as_deref(), Some("c0ffee"));
         assert_eq!(reply.field("state").as_deref(), Some("active"));
