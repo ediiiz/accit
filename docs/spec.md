@@ -34,7 +34,7 @@ The verification listener answers `GET /verify` with an empty body. Evaluated in
 | 8    | Otherwise                                                                                                                     | 403    |
 
 - Hostnames are canonicalized: lowercase, trailing dot removed, port removed, IDNA ASCII form; anything else (userinfo, path, wildcard, IP literal for a covered host) is invalid.
-- Addresses are canonicalized; IPv4-mapped IPv6 becomes IPv4. With `profile: production`, a non-public Address that is not in a Trusted network is rejected at step 3.
+- Addresses are canonicalized; IPv4-mapped IPv6 becomes IPv4. A public IPv6 Address is global unicast `2000::/3` minus `2001::/23`, `2001:db8::/32` and `3fff::/20` (6to4 `2002::/16` stays public). With `profile: production`, a non-public Address that is not in a Trusted network is rejected at step 3.
 - Verification never mutates state and never renews a Grant.
 - The 403 body is the plain text `Forbidden`, with no product name. No redirect.
 

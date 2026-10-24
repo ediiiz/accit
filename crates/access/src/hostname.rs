@@ -32,6 +32,16 @@ fn valid_label(label: &str) -> bool {
         && label.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+/// WHATWG "ends in a number": all decimal digits, or `0x` followed only by hex digits.
+fn is_numeric_label(label: &str) -> bool {
+    let hex = label.strip_prefix("0x").or_else(|| label.strip_prefix("0X"));
+
+    match hex {
+        Some(digits) => digits.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        None => label.bytes().all(|byte| byte.is_ascii_digit()),
+    }
+}
+
 fn validate_ascii(name: &str) -> Result<(), HostnameError> {
     if name.len() > 253 {
         return Err(HostnameError::TooLong);
@@ -41,8 +51,8 @@ fn validate_ascii(name: &str) -> Result<(), HostnameError> {
         return Err(HostnameError::InvalidLabel);
     }
 
-    // A numeric last label is an IPv4 literal in disguise (`1.2.3`, `0x7f.1`).
-    if name.rsplit('.').next().is_some_and(|label| label.bytes().all(|byte| byte.is_ascii_digit())) {
+    // A numeric last label is an IPv4 literal in disguise (`1.2.3`, `0x7f.1`, `0x7f000001`).
+    if name.rsplit('.').next().is_some_and(is_numeric_label) {
         return Err(HostnameError::IpLiteral);
     }
 
