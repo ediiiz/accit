@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::SystemTime;
 
-use access::{Gate, Hostname, Policy, Verdict};
+use access::{Address, Gate, Hostname, Policy, TrustedNetworks, Verdict};
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -58,22 +58,29 @@ impl Fixed {
     }
 }
 
+/// The `protection` of the config: what a reload replaces.
+#[derive(Debug)]
+struct Protection {
+    policy: Policy,
+    trusted: TrustedNetworks,
+}
+
 #[derive(Debug)]
 struct Rules {
-    /// Replaced whole on reload, so each decision sees one Policy.
-    policy: RwLock<Arc<Policy>>,
+    /// Replaced whole on reload, so each decision sees one Policy and one set of Trusted networks.
+    protection: RwLock<Arc<Protection>>,
     fixed: Fixed,
     grants: Grants,
 }
 
-/// The gate decision's inputs: the Policy, the Portal host, the profile and the Grants.
+/// The gate decision's inputs: the Policy, the Trusted networks, the Portal host, the profile and the Grants.
 #[derive(Clone, Debug)]
 pub struct Verifier(Arc<Rules>);
 
 impl Verifier {
     pub fn new(config: &Config, grants: Grants) -> Self {
         Self(Arc::new(Rules {
-            policy: RwLock::new(Arc::new(config.protection.clone())),
+            protection: RwLock::new(Arc::new(Protection::from(config))),
             fixed: Fixed::of(config),
             grants,
         }))
@@ -85,7 +92,7 @@ impl Verifier {
     }
 
     fn log_warning(&self) -> Option<&'static str> {
-        let warning = self.policy().gates_nothing().then_some(GATES_NOTHING);
+        let warning = self.protection().policy.gates_nothing().then_some(GATES_NOTHING);
 
         if let Some(warning) = warning {
             tracing::warn!("{warning}");
@@ -108,20 +115,27 @@ impl Verifier {
             path.display()
         );
 
-        *self.0.policy.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(config.protection);
+        *self.0.protection.write().unwrap_or_else(PoisonError::into_inner) =
+            Arc::new(Protection::from(&config));
         tracing::info!("policy reloaded");
 
         Ok(self.log_warning())
     }
 
-    fn policy(&self) -> Arc<Policy> {
-        Arc::clone(&self.0.policy.read().unwrap_or_else(PoisonError::into_inner))
+    fn protection(&self) -> Arc<Protection> {
+        Arc::clone(&self.0.protection.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Inside a Trusted network and not excluded: the Portal shows `trusted` and offers no Unlock.
+    pub(crate) fn is_trusted(&self, address: Address) -> bool {
+        self.protection().trusted.contains(address)
     }
 
     fn decide(&self, headers: &HeaderMap) -> Verdict {
-        let policy = self.policy();
+        let protection = self.protection();
         let gate = Gate {
-            policy: &policy,
+            policy: &protection.policy,
+            trusted: &protection.trusted,
             portal_host: self.0.fixed.portal_host.as_ref(),
             public_only: self.0.fixed.profile == Profile::Production,
         };
@@ -130,6 +144,12 @@ impl Verifier {
         gate.decide(values("x-forwarded-for"), values("x-forwarded-host"), |address| {
             self.0.grants.active_until(address, SystemTime::now()).is_some()
         })
+    }
+}
+
+impl From<&Config> for Protection {
+    fn from(config: &Config) -> Self {
+        Self { policy: config.protection.clone(), trusted: config.trusted_networks.clone() }
     }
 }
 

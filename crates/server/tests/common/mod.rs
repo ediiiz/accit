@@ -75,7 +75,10 @@ pub async fn verify_router(trust: ProxyTrust) -> Router {
 
 /// A Portal over an empty in-memory store, ready.
 pub async fn portal_router(trust: ProxyTrust) -> Router {
-    let portal = portal::Portal::new(&config(PRODUCTION), grants().await, ready(), portal::Clock::system());
+    let config = config(PRODUCTION);
+    let grants = grants().await;
+    let verifier = Verifier::new(&config, grants.clone());
+    let portal = portal::Portal::new(&config, grants, ready(), portal::Clock::system(), &verifier);
 
     portal::router(trust, portal)
 }

@@ -111,8 +111,9 @@ pub async fn run(config: Config, path: &Path) -> Result<()> {
     let verifier = Verifier::new(&config, grants.clone());
     verifier.log_startup();
     admin::start(config.admin_socket.as_deref(), &verifier, path)?;
-    let verify_app = verify::router(readiness.clone(), trust.clone(), verifier);
-    let portal_app = portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system()));
+    let verify_app = verify::router(readiness.clone(), trust.clone(), verifier.clone());
+    let portal_app =
+        portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system(), &verifier));
 
     let servers = serve_both(portal_listener, verify_listener, portal_app, verify_app, stopping);
 
