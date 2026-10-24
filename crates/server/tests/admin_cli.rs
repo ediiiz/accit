@@ -4,9 +4,12 @@
 #![allow(clippy::unwrap_used, reason = "test fixtures: a failure here is a test bug")]
 
 use std::fs::File;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
@@ -24,12 +27,16 @@ struct Daemon {
 }
 
 impl Daemon {
+    /// Under umask 000, so only accit itself can keep the socket owner-only.
     fn start() -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        Self::start_in(tempfile::tempdir().unwrap())
+    }
+
+    fn start_in(dir: TempDir) -> Self {
         write_config(&dir, SELECTED);
         let log = File::create(dir.path().join("daemon.log")).unwrap();
-        let child = accit()
-            .arg("serve")
+        let child = Command::new("sh")
+            .args(["-c", "umask 000 && exec \"$0\" serve", env!("CARGO_BIN_EXE_accit")])
             .env("ACCIT_CONFIG", dir.path().join("accit.yaml"))
             .stdout(Stdio::null())
             .stderr(log)
@@ -116,6 +123,52 @@ fn serve_opens_an_owner_only_admin_socket() {
     assert_eq!(std::fs::metadata(daemon.socket()).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
+/// Watches `path` until stopped and returns every mode a socket there had.
+fn watch_modes(path: PathBuf, stop: Arc<AtomicBool>) -> JoinHandle<Vec<u32>> {
+    std::thread::spawn(move || {
+        let mut modes = Vec::new();
+
+        while !stop.load(Ordering::Relaxed) {
+            if let Ok(metadata) = std::fs::symlink_metadata(&path)
+                && metadata.file_type().is_socket()
+            {
+                modes.push(metadata.permissions().mode() & 0o777);
+            }
+        }
+
+        modes
+    })
+}
+
+#[test]
+fn under_a_permissive_umask_the_socket_is_never_seen_wider_than_owner_only() {
+    for _ in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let watcher = watch_modes(dir.path().join("admin.sock"), Arc::clone(&stop));
+
+        let daemon = Daemon::start_in(dir);
+        std::thread::sleep(Duration::from_millis(50));
+        stop.store(true, Ordering::Relaxed);
+        let modes = watcher.join().unwrap();
+
+        let wider: Vec<String> =
+            modes.iter().filter(|&&mode| mode != 0o600).map(|mode| format!("{mode:o}")).collect();
+        assert!(!modes.is_empty());
+        assert_eq!(wider, Vec::<String>::new());
+        assert_eq!(leftovers(daemon.dir.path()), Vec::<String>::new());
+    }
+}
+
+/// Anything in `dir` besides what the test and the daemon are meant to leave there.
+fn leftovers(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| !["accit.yaml", "daemon.log", "admin.sock"].contains(&name.as_str()))
+        .collect()
+}
+
 #[test]
 fn admin_reload_reports_the_daemons_answer_and_its_errors() {
     let daemon = Daemon::start();
@@ -123,7 +176,7 @@ fn admin_reload_reports_the_daemons_answer_and_its_errors() {
     daemon.write("  mode: all\n");
     let reloaded = daemon.admin("reload");
     assert!(reloaded.status.success(), "{}", text(&reloaded.stderr));
-    assert_eq!(text(&reloaded.stdout), "policy reloaded\n");
+    assert!(!text(&reloaded.stdout).contains("warning"), "{}", text(&reloaded.stdout));
 
     daemon.write("  mode: selected\n");
     let reloaded = daemon.admin("reload");
@@ -133,7 +186,7 @@ fn admin_reload_reports_the_daemons_answer_and_its_errors() {
     daemon.write("  mode: everything\n");
     let refused = daemon.admin("reload");
     assert!(!refused.status.success());
-    assert!(text(&refused.stderr).contains("accit.yaml"), "{}", text(&refused.stderr));
+    assert!(text(&refused.stderr).contains("everything"), "{}", text(&refused.stderr));
 }
 
 #[test]

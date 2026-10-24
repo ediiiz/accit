@@ -1,9 +1,9 @@
 //! Administration (docs/spec.md section 11): `accit admin <command>` talks to the daemon over a
 //! Unix socket only the daemon's user can open.
 
-use std::fs::Permissions;
+use std::fs::{DirBuilder, Permissions};
 use std::io::ErrorKind;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -15,6 +15,7 @@ use tokio::signal::unix::{Signal, SignalKind, signal};
 use crate::verify::Verifier;
 
 const OWNER_ONLY: u32 = 0o600;
+const OWNER_ONLY_DIR: u32 = 0o700;
 const MAX_REQUEST: u64 = 4096;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const OK: &str = "ok";
@@ -32,11 +33,33 @@ fn remove_stale(path: &Path) -> Result<()> {
     }
 }
 
+/// Binds inside a fresh 0700 directory and moves the socket into place at 0600, so whatever the
+/// umask, `path` never names a socket anyone else can connect to.
 pub fn bind(path: &Path) -> Result<UnixListener> {
     remove_stale(path)?;
-    let listener = UnixListener::bind(path).with_context(|| format!("binding {}", path.display()))?;
-    std::fs::set_permissions(path, Permissions::from_mode(OWNER_ONLY))
-        .with_context(|| format!("restricting {}", path.display()))?;
+    let name =
+        path.file_name().with_context(|| format!("admin_socket {} has no file name", path.display()))?;
+    let staging = path.with_file_name(format!(".{}.staging", name.to_string_lossy()));
+    // Left behind only by a crash during a previous bind.
+    if std::fs::symlink_metadata(&staging).is_ok() {
+        std::fs::remove_dir_all(&staging).with_context(|| format!("removing stale {}", staging.display()))?;
+    }
+    DirBuilder::new()
+        .mode(OWNER_ONLY_DIR)
+        .create(&staging)
+        .with_context(|| format!("creating {}", staging.display()))?;
+    let bound = bind_staged(&staging.join("admin.sock"), path);
+    let removed =
+        std::fs::remove_dir_all(&staging).with_context(|| format!("removing {}", staging.display()));
+
+    bound.and_then(|listener| removed.map(|()| listener))
+}
+
+fn bind_staged(staged: &Path, path: &Path) -> Result<UnixListener> {
+    let listener = UnixListener::bind(staged).with_context(|| format!("binding {}", staged.display()))?;
+    std::fs::set_permissions(staged, Permissions::from_mode(OWNER_ONLY))
+        .with_context(|| format!("restricting {}", staged.display()))?;
+    std::fs::rename(staged, path).with_context(|| format!("moving the socket to {}", path.display()))?;
 
     Ok(listener)
 }
@@ -90,9 +113,14 @@ async fn reload_on_hangup(mut hangup: Signal, verifier: Verifier, config: PathBu
     }
 }
 
+/// Install first thing: until then SIGHUP ends the process. Signals that arrive before `start`
+/// are kept and reload then.
+pub fn hangup() -> Result<Signal> {
+    signal(SignalKind::hangup()).context("installing the SIGHUP handler")
+}
+
 /// SIGHUP and the socket at `socket` both reload from `config`. Both are in place on return.
-pub fn start(socket: Option<&Path>, verifier: &Verifier, config: &Path) -> Result<()> {
-    let hangup = signal(SignalKind::hangup()).context("installing the SIGHUP handler")?;
+pub fn start(hangup: Signal, socket: Option<&Path>, verifier: &Verifier, config: &Path) -> Result<()> {
     tokio::spawn(reload_on_hangup(hangup, verifier.clone(), config.to_owned()));
 
     if let Some(path) = socket {

@@ -1,6 +1,6 @@
 //! Policy reload (docs/spec.md section 4): applied whole, an invalid file keeps the previous
-//! Policy, and Grants survive any change of mode or lists. A changed profile or Portal host needs
-//! a restart, so such a file is invalid for reload.
+//! Policy, and Grants survive any change of mode or lists. A changed profile, `public_origin` or proxy
+//! trust needs a restart, so such a file is invalid for reload.
 
 #![allow(clippy::unwrap_used, reason = "test fixtures: a failure here is a test bug")]
 
@@ -157,6 +157,15 @@ async fn a_changed_portal_host_is_refused_and_keeps_the_previous_policy() {
 
     assert!(setup.verifier.reload(&setup.file).is_err());
     assert_eq!(setup.status(OTHER, "jellyfin.example.com").await, StatusCode::FORBIDDEN);
+    assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn a_changed_public_origin_port_is_refused() {
+    let setup = Setup::new(SELECTED, grants().await);
+    let moved = setup.yaml.replace("https://access.example.com", "https://access.example.com:8443");
+
+    assert_restart_required(&setup, &moved.replace(SELECTED, ALL));
     assert_eq!(setup.status(OTHER, "photos.example.com").await, StatusCode::NO_CONTENT);
 }
 

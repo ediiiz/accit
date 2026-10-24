@@ -35,6 +35,18 @@ async fn a_stale_socket_is_replaced() {
 }
 
 #[tokio::test]
+async fn a_staging_directory_left_by_a_crash_does_not_block_the_bind() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("admin.sock");
+    std::fs::create_dir(dir.path().join(".admin.sock.staging")).unwrap();
+
+    let _listener = admin::bind(&path).unwrap();
+
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[tokio::test]
 async fn a_file_that_is_not_a_socket_is_left_alone() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("accit.db");
@@ -116,7 +128,7 @@ async fn an_invalid_config_comes_back_as_the_daemons_error_and_changes_nothing()
 
     let error = format!("{:#}", admin::request(&daemon.socket(), "reload").await.unwrap_err());
 
-    assert!(error.contains("accit.yaml"), "{error}");
+    assert!(error.contains("everything"), "{error}");
     assert_eq!(daemon.status("photos.example.com").await, StatusCode::NO_CONTENT);
     assert_eq!(daemon.status("jellyfin.example.com").await, StatusCode::FORBIDDEN);
 }

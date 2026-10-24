@@ -68,11 +68,12 @@ fn help() {
 }
 
 pub async fn run(args: &[String]) -> Result<()> {
-    let command = args.first().map_or("serve", String::as_str);
+    let (command, rest) =
+        args.split_first().map_or(("serve", &[][..]), |(command, rest)| (command.as_str(), rest));
 
     match command {
         "serve" => serve().await,
-        "admin" => admin(&args[1..]).await,
+        "admin" => admin(rest).await,
         "healthcheck" => healthcheck(&Config::load(&config::path_from_env())?).await,
         "-h" | "--help" | "help" => {
             help();

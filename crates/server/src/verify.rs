@@ -25,6 +25,7 @@ const GATES_NOTHING: &str = "protection: selected mode without hosts; no host re
 #[derive(Debug)]
 struct Fixed {
     profile: Profile,
+    public_origin: Option<String>,
     portal_host: Option<Hostname>,
     trusted_proxy: Option<IpAddr>,
     proxy_token_file: Option<PathBuf>,
@@ -35,6 +36,7 @@ impl Fixed {
     fn of(config: &Config) -> Self {
         Self {
             profile: config.profile,
+            public_origin: config.public_origin.clone(),
             portal_host: config.portal_host.clone(),
             trusted_proxy: config.trusted_proxy,
             proxy_token_file: config.proxy_token_file.clone(),
@@ -45,7 +47,7 @@ impl Fixed {
     fn changed_keys(&self, new: &Self) -> Vec<&'static str> {
         [
             ("profile", self.profile != new.profile),
-            ("public_origin", self.portal_host != new.portal_host),
+            ("public_origin", self.public_origin != new.public_origin),
             ("trusted_proxy", self.trusted_proxy != new.trusted_proxy),
             (
                 "proxy_token_file",

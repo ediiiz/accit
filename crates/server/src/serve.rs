@@ -94,6 +94,7 @@ async fn open_grants(config: &Config) -> Result<Grants> {
 
 /// `path` is where `config` came from; reloads read it again.
 pub async fn run(config: Config, path: &Path) -> Result<()> {
+    let hangup = admin::hangup()?;
     let portal_listener = bind(config.listen.portal).await?;
     let verify_listener = bind(config.listen.verify).await?;
     let (stop, stopping) = watch::channel(false);
@@ -110,7 +111,7 @@ pub async fn run(config: Config, path: &Path) -> Result<()> {
     trust.log_startup();
     let verifier = Verifier::new(&config, grants.clone());
     verifier.log_startup();
-    admin::start(config.admin_socket.as_deref(), &verifier, path)?;
+    admin::start(hangup, config.admin_socket.as_deref(), &verifier, path)?;
     let verify_app = verify::router(readiness.clone(), trust.clone(), verifier.clone());
     let portal_app =
         portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system(), &verifier));
