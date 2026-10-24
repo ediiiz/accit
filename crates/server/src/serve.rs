@@ -13,7 +13,7 @@ use tokio::sync::watch;
 use crate::health::{self, Readiness};
 use crate::portal::{self, Clock, Portal};
 use crate::trust::ProxyTrust;
-use crate::verify;
+use crate::verify::{self, Verifier};
 
 const DRAIN: Duration = Duration::from_secs(10);
 const CLEANUP: Duration = Duration::from_hours(1);
@@ -106,10 +106,10 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(health::guard_clocks(readiness.clone(), SystemTime::now, CLOCK_CHECK));
 
     trust.log_startup();
-
-    let portal_app =
-        portal::router(trust.clone(), Portal::new(&config, grants, readiness.clone(), Clock::system()));
-    let verify_app = verify::router(readiness.clone(), trust);
+    let verifier = Verifier::new(&config, grants.clone());
+    verifier.log_startup();
+    let verify_app = verify::router(readiness.clone(), trust.clone(), verifier);
+    let portal_app = portal::router(trust, Portal::new(&config, grants, readiness.clone(), Clock::system()));
 
     tokio::select! {
         result = serve_both(portal_listener, verify_listener, portal_app, verify_app, stopping) => result,

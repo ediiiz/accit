@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, reason = "test helpers: a broken fixture is a test bug")]
 
 use std::net::SocketAddr;
+use std::time::{Duration, SystemTime};
 
 use axum::Router;
 use axum::body::Body;
@@ -12,6 +13,7 @@ use axum::http::{Request, StatusCode, header};
 use config::Config;
 use server::health::Readiness;
 use server::trust::ProxyTrust;
+use server::verify::Verifier;
 use server::{portal, verify};
 use store::{Grants, Limits};
 use tower::ServiceExt;
@@ -33,35 +35,49 @@ protection:
 ";
 
 pub fn trust(yaml: &str) -> ProxyTrust {
-    let config = Config::parse(yaml, |_| Ok(TOKEN.to_owned())).unwrap();
-
-    ProxyTrust::from_config(&config)
+    ProxyTrust::from_config(&config(yaml))
 }
 
 pub fn production() -> ProxyTrust {
     trust(PRODUCTION)
 }
 
-pub fn verify_router(trust: ProxyTrust) -> Router {
+pub fn config(yaml: &str) -> Config {
+    Config::parse(yaml, |_| Ok(TOKEN.to_owned())).unwrap()
+}
+
+/// In memory, with the spec's 7-day Grants.
+pub async fn grants() -> Grants {
+    let limits = Limits {
+        grant_duration: Duration::from_hours(7 * 24),
+        max_grants: 1_000,
+        audit_retention: Duration::from_hours(7 * 24),
+    };
+
+    Grants::open(None, limits, SystemTime::now()).await.unwrap()
+}
+
+/// The production config's gate, with an empty Grant store.
+pub async fn verifier() -> Verifier {
+    Verifier::new(&config(PRODUCTION), grants().await)
+}
+
+pub fn ready() -> Readiness {
     let readiness = Readiness::default();
     readiness.set(true);
 
-    verify::router(readiness, trust)
+    readiness
+}
+
+pub async fn verify_router(trust: ProxyTrust) -> Router {
+    verify::router(ready(), trust, verifier().await)
 }
 
 /// A Portal over an empty in-memory store, ready.
 pub async fn portal_router(trust: ProxyTrust) -> Router {
-    let config = Config::parse(PRODUCTION, |_| Ok(TOKEN.to_owned())).unwrap();
-    let limits = Limits {
-        grant_duration: config.grant_duration,
-        max_grants: config.max_grants,
-        audit_retention: config.audit_retention,
-    };
-    let grants = Grants::open(None, limits, std::time::SystemTime::now()).await.unwrap();
-    let readiness = Readiness::default();
-    readiness.set(true);
+    let portal = portal::Portal::new(&config(PRODUCTION), grants().await, ready(), portal::Clock::system());
 
-    portal::router(trust, portal::Portal::new(&config, grants, readiness, portal::Clock::system()))
+    portal::router(trust, portal)
 }
 
 pub struct Call {
