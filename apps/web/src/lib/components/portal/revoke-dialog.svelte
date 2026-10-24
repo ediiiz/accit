@@ -3,9 +3,13 @@
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import { m } from '#lib/paraglide/messages.js';
 
-	let { busy, onconfirm }: { busy: boolean; onconfirm: () => Promise<void> } = $props();
-
-	let open = $state(false);
+	let {
+		busy,
+		open = $bindable(false),
+		trigger = true,
+		onconfirm
+	}: { busy: boolean; open?: boolean; trigger?: boolean; onconfirm: () => Promise<void> } =
+		$props();
 
 	async function confirm() {
 		await onconfirm();
@@ -14,11 +18,13 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Trigger>
-		{#snippet child({ props })}
-			<Button variant="ghost" class="h-11 w-full" {...props}>{m.disable_access()}</Button>
-		{/snippet}
-	</Dialog.Trigger>
+	{#if trigger}
+		<Dialog.Trigger>
+			{#snippet child({ props })}
+				<Button variant="ghost" class="h-11 w-full" {...props}>{m.disable_access()}</Button>
+			{/snippet}
+		</Dialog.Trigger>
+	{/if}
 	<Dialog.Content showCloseButton={false}>
 		<Dialog.Header>
 			<Dialog.Title>{m.disable_title()}</Dialog.Title>
