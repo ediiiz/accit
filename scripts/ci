@@ -15,6 +15,13 @@ bun run --cwd apps/web prebuild >/dev/null
 (cd apps/web && bunx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide >/dev/null)
 step "rust gate"
 scripts/check-rust
+step "supply chain policy"
+# Licenses, bans and sources work offline; advisories need the network (scripts/audit).
+if command -v cargo-deny >/dev/null 2>&1; then
+  cargo deny check licenses bans sources
+else
+  echo "cargo-deny not installed: skipped (cargo install cargo-deny --locked)"
+fi
 step "lint"
 bun run lint
 step "format"
@@ -25,5 +32,10 @@ step "unit tests"
 bun run web:test:unit
 step "component tests"
 bun run web:test:component
+
+step "tool tests"
+bun test tools/budget tools/bench
+step "web budget"
+scripts/web-budget
 
 printf '\nlocal CI passed\n'

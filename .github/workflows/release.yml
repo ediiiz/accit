@@ -18,6 +18,13 @@ name: Release
 # Manual rebuild: run this workflow via workflow_dispatch with build_only=true to
 # build + push the image (`latest` + `sha-<sha>` tags) without cutting a release.
 #
+# Hardening (docs/spec.md sections 9, 13, 14), all before the tag so a failure publishes nothing:
+#   - dependency scan (cargo-deny advisories, bun audit) and the Portal's 150 KiB budget,
+#   - multi-arch image (linux/amd64, linux/arm64) with SLSA provenance and a BuildKit SBOM,
+#   - image size budget and a Trivy scan of the pushed image,
+#   - an SPDX SBOM attached to the GitHub release.
+# Third-party actions are pinned to commit SHAs; the image's base images to digests (Dockerfile).
+#
 # If nothing since the last tag warrants a bump, the run is a no-op.
 
 on:
@@ -53,7 +60,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Full history + tags are required to compute the version bump.
           fetch-depth: 0
@@ -109,6 +116,7 @@ jobs:
           SHA="$GITHUB_SHA"
 
           echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           {
             echo "tags<<EOF"
             echo "$IMAGE:latest"
@@ -121,32 +129,97 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "cache=$IMAGE:buildcache" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Bun
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Install cargo-deny
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-deny@0.20.2
+
+      - name: Scan dependencies
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        run: scripts/audit
+
+      - name: Check cargo-deny policy
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        run: cargo deny check licenses bans sources
+
+      - name: Check the Portal budget
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        run: scripts/web-budget
+
       - name: Log in to GHCR
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up QEMU
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+
       - name: Set up Buildx
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build and push
+        id: build
         if: ${{ success() && steps.cfg.outputs.registry != '' }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: docker/single/Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
-          provenance: false
+          provenance: mode=max
+          sbom: true
           tags: ${{ steps.cfg.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=registry,ref=${{ steps.cfg.outputs.cache }}
           cache-to: type=registry,ref=${{ steps.cfg.outputs.cache }},mode=max
+
+      - name: Check the image size budget
+        if: ${{ success() && steps.build.outputs.digest != '' }}
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}"
+          docker pull --platform linux/amd64 "$IMAGE"
+          scripts/image-size "$IMAGE"
+
+      - name: Scan the image
+        if: ${{ success() && steps.build.outputs.digest != '' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Generate the SBOM
+        if: ${{ success() && steps.build.outputs.digest != '' }}
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ steps.cfg.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
 
       # ---- Publish the release: only reached if the build above succeeded -----
 
@@ -165,7 +238,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/RELEASE_NOTES.md --verify-tag
+        run: gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/RELEASE_NOTES.md --verify-tag sbom.spdx.json
 
   # ---------------------------------------------------------------------------
   # Promote: after a release is cut, open/refresh a prod bump PR in the GitOps

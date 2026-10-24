@@ -38,6 +38,20 @@ bun run dev          # Portal dev server :5173, proxies /api to :3000
 | `bun run lint`, `bun run format:check`       | oxlint + eslint, oxfmt.                     |
 | `bun run fallow`                             | Dead code, duplication, health.             |
 | `docker build -f docker/single/Dockerfile .` | Production image.                           |
+| `scripts/web-budget`, `scripts/bench`        | Portal 150 KiB budget; RSS and latency.     |
+| `scripts/audit`                              | Dependency advisories (needs the network).  |
+
+## Supported versions
+
+| Component | Version                                                              |
+| --------- | -------------------------------------------------------------------- |
+| Traefik   | ≥ 3.7.16 (the Compose harness runs 3.7.16)                           |
+| Rust      | 1.97 (`rust-version`; the image and `scripts/cargo` build with 1.97) |
+| Svelte    | 5 (SvelteKit 3), build time only                                     |
+| Bun       | 1.4 (build time only)                                                |
+| Image     | `linux/amd64`, `linux/arm64`, distroless `cc-debian13`, nonroot      |
+
+Budgets and their measurements: [`docs/performance.md`](docs/performance.md).
 
 ## i18n
 

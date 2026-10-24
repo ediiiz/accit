@@ -20,9 +20,13 @@ computed and the image built in one job, so a failed build never publishes a tag
    runs one job that, in order:
    - computes the next version from commits since the last `v*` tag
      (`feat` → minor, `fix`/`perf`/etc → patch, breaking → major),
-   - builds and pushes the single-container image to GHCR tagged with that version
-     (plus `latest` and `sha-<sha>`), then
-   - pushes the `vX.Y.Z` tag and creates a GitHub release with generated notes.
+   - scans dependencies (`scripts/audit`, cargo-deny policy) and checks the Portal's
+     150 KiB budget,
+   - builds and pushes the multi-arch (amd64, arm64) single-container image to GHCR tagged
+     with that version (plus `latest` and `sha-<sha>`), with provenance and an SBOM,
+   - checks the image size budget, scans the pushed image with Trivy and generates an SPDX
+     SBOM, then
+   - pushes the `vX.Y.Z` tag and creates a GitHub release with generated notes and the SBOM attached.
 
 The image build happens **before** the tag/release steps and gates them: if the
 build fails, the job aborts and no tag or release is published. There is no

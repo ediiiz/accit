@@ -1,0 +1,9 @@
+#!/bin/sh
+# Dependency vulnerability scan: RustSec advisories (cargo-deny) and the bun lockfile. Needs the
+# network for the advisory databases, so it is not part of scripts/ci; release.yml runs it too.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+cargo deny check advisories
+bun audit

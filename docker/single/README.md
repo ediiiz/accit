@@ -34,6 +34,8 @@ Setup:
   the package is private; link it to the repo or change its visibility in the
   package settings.
 
+The image is multi-arch (`linux/amd64`, `linux/arm64`; arm64 builds under QEMU) and carries SLSA provenance and a BuildKit SBOM. Base images are pinned by digest in the `Dockerfile` (`ARG`s at the top, with the bump command); bump them deliberately, then rebuild. Before the tag, the job runs the dependency scan, the Portal budget, the image size budget and a Trivy scan (HIGH and CRITICAL with a fix fail the release); an SPDX SBOM of the pushed image is attached to the GitHub release. Budgets and measurements: [docs/performance.md](../../docs/performance.md).
+
 Trigger: automatically when a release is cut (merge `staging → main`), or
 manually via **workflow_dispatch** with `build_only=true` to rebuild without
 releasing. Images are tagged `latest`, `sha-<commit>`, and the version tag on a

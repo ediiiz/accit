@@ -1,0 +1,9 @@
+#!/bin/sh
+# Portal budget (docs/spec.md section 9): initial HTML, CSS and JS under 150 KiB gzip. Builds the
+# Portal, then measures what the prerendered page loads eagerly.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+bun run --cwd apps/web build >/dev/null
+exec bun tools/budget/web-budget-cli.ts apps/web/build

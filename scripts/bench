@@ -1,0 +1,9 @@
+#!/bin/sh
+# Idle RSS with 1,000 Grants and p95 /verify latency at 500 checks/s (docs/spec.md section 14).
+# Needs a release binary: scripts/cargo build --release -p server (or $CARGO).
+# Usage: scripts/bench [path/to/accit]   (default target/release/accit; BENCH_SECONDS, BENCH_CPUS)
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+exec bun tools/bench/bench.ts "${1:-target/release/accit}"
