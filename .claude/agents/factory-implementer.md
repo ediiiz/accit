@@ -22,7 +22,7 @@ You work one ticket end to end inside one **build slot**: a reused worktree with
    - Where the ticket and `docs/spec.md` disagree, or the spec leaves a decision open, stop with `RESULT human`.
    - New migration: next number, then `scripts/factory/factory renumber`.
 3. **Gates green.** `scripts/check-rust` when Rust changed (the slot env sets `CARGO`, so it runs the host toolchain); regenerate checked-in generated files as `crates/AGENTS.md` describes; then `scripts/ci` (the full local CI) on the final tree. Done when every gate that applies passes on the final tree.
-4. **Commit and push.** Conventional commit (`type(scope): summary`, body ends `Closes #<issue>`), then `git push -u origin <branch>`; fix mode after a rebase: `git push --force-with-lease origin <branch>`.
+4. **Commit and push.** Conventional commit (`type(scope): summary`, body ends `Closes #<issue>`), then `git push -u origin <branch>`. Fix mode: if the PR is behind `staging`, `git merge --no-edit origin/staging` first; never rebase or force-push a pushed branch.
 5. **Hand over.** New ticket: `gh pr create --title "<commit subject>" --base staging --head <branch> --body-file <file>` with what changed, `Closes #<issue>` and the gates you ran. Fix mode: `gh pr comment <pr> --body-file <file>` mapping each finding to its fix.
 
 ## Result

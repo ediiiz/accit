@@ -14,7 +14,7 @@ Dependencies flow one way: `access ← config ← server`.
 
 ## Commands
 
-No host toolchain needed: `scripts/cargo <args>` runs cargo in the pinned image (`docker/rust-dev`).
+`scripts/check-rust` uses `$CARGO`, else the host `cargo`, else `scripts/cargo` (cargo in the pinned image, `docker/rust-dev`) for hosts without a toolchain.
 
 - Gate (run before every commit touching `crates/`): `scripts/check-rust`. It runs fmt, clippy `-D warnings`, the 300-line file cap and all tests.
 - Format: `scripts/cargo fmt`.
