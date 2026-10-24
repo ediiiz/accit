@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, reason = "test helpers: a broken fixture is a test bug")]
 
 use std::net::SocketAddr;
+use std::time::{Duration, SystemTime};
 
 use axum::Router;
 use axum::body::Body;
@@ -12,7 +13,9 @@ use axum::http::{Request, StatusCode, header};
 use config::Config;
 use server::health::Readiness;
 use server::trust::ProxyTrust;
+use server::verify::Verifier;
 use server::{portal, verify};
+use store::{Grants, Limits};
 use tower::ServiceExt;
 
 pub const PROXY: &str = "172.30.0.2";
@@ -30,20 +33,42 @@ protection:
 ";
 
 pub fn trust(yaml: &str) -> ProxyTrust {
-    let config = Config::parse(yaml, |_| Ok(TOKEN.to_owned())).unwrap();
-
-    ProxyTrust::from_config(&config)
+    ProxyTrust::from_config(&config(yaml))
 }
 
 pub fn production() -> ProxyTrust {
     trust(PRODUCTION)
 }
 
-pub fn verify_router(trust: ProxyTrust) -> Router {
+pub fn config(yaml: &str) -> Config {
+    Config::parse(yaml, |_| Ok(TOKEN.to_owned())).unwrap()
+}
+
+/// In memory, with the spec's 7-day Grants.
+pub async fn grants() -> Grants {
+    let limits = Limits {
+        grant_duration: Duration::from_hours(7 * 24),
+        max_grants: 1_000,
+        audit_retention: Duration::from_hours(7 * 24),
+    };
+
+    Grants::open(None, limits, SystemTime::now()).await.unwrap()
+}
+
+/// The production config's gate, without Grants.
+pub async fn verifier() -> Verifier {
+    Verifier::new(&config(PRODUCTION), grants().await)
+}
+
+pub fn ready() -> Readiness {
     let readiness = Readiness::default();
     readiness.set(true);
 
-    verify::router(readiness, trust)
+    readiness
+}
+
+pub async fn verify_router(trust: ProxyTrust) -> Router {
+    verify::router(ready(), trust, verifier().await)
 }
 
 pub fn portal_router(trust: ProxyTrust) -> Router {
