@@ -1,0 +1,226 @@
+name: Release
+
+# Release-on-merge flow, built on git-cliff + the GitHub CLI.
+#
+# Flow: work accumulates on `staging`; merging a PR `staging -> main` cuts a
+# release. On each push to `main` this single job runs, in order:
+#   1. computes the next version from Conventional Commits since the last tag
+#      (git-cliff: feat -> minor, fix -> patch, `!`/BREAKING -> major),
+#   2. builds and pushes the single-container image to GHCR, THEN
+#   3. tags `vX.Y.Z` and creates the GitHub release.
+#
+# The image build runs BEFORE the tag/release steps *in the same job*, and those
+# steps are guarded with `success()`. So a failed build aborts the run and no
+# tag or release is ever published — the release is gated on a green image
+# build. Nothing keys off a tag-push event, so the automatic GITHUB_TOKEN is
+# sufficient for the tag push.
+#
+# Manual rebuild: run this workflow via workflow_dispatch with build_only=true to
+# build + push the image (`latest` + `sha-<sha>` tags) without cutting a release.
+#
+# If nothing since the last tag warrants a bump, the run is a no-op.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_only:
+        description: "Build & push the image (latest + sha) without cutting a release"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # The infra repo directory name (apps/<APP_NAME>/) the promote job bumps.
+  # Defaults to this repo's name; set an APP_NAME repo variable to override.
+  APP_NAME: ${{ vars.APP_NAME || github.event.repository.name }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.version.outputs.release }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags are required to compute the version bump.
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        if: github.event.inputs.build_only != 'true'
+        run: |
+          set -euo pipefail
+          GIT_CLIFF_VERSION=2.6.1
+          curl -sSL -o /tmp/git-cliff.tar.gz \
+            "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf /tmp/git-cliff.tar.gz -C /tmp
+          sudo install "/tmp/git-cliff-${GIT_CLIFF_VERSION}/git-cliff" /usr/local/bin/git-cliff
+          git-cliff --version
+
+      - name: Compute next version
+        id: version
+        if: github.event.inputs.build_only != 'true'
+        run: |
+          set -euo pipefail
+          LATEST=$(git tag --list 'v*' --sort=-v:refname | head -1 || true)
+          NEXT=$(git-cliff --bumped-version)
+          # Normalize to a v-prefix (git-cliff omits it on the very first release).
+          case "$NEXT" in v*) ;; *) NEXT="v$NEXT" ;; esac
+          echo "latest tag: ${LATEST:-<none>} / next: $NEXT"
+          if [ -n "$LATEST" ] && [ "$NEXT" = "$LATEST" ]; then
+            echo "No release-worthy commits since $LATEST; skipping."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        if: steps.version.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          git-cliff --unreleased --tag "${{ steps.version.outputs.version }}" \
+            --strip header -o /tmp/RELEASE_NOTES.md
+          echo "----- notes -----"; cat /tmp/RELEASE_NOTES.md
+
+      # ---- Image build: must succeed before any tag/release is published ------
+
+      - name: Resolve build settings
+        id: cfg
+        if: ${{ github.event.inputs.build_only == 'true' || steps.version.outputs.release == 'true' }}
+        run: |
+          set -euo pipefail
+          # image = ghcr.io/{owner}/{repo}, lowercased (GHCR rejects uppercase).
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          # FULL 40-char sha: one sha scheme across preview.yml and the prod pin
+          # the promote job writes to values.yaml.
+          SHA="$GITHUB_SHA"
+
+          echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "$IMAGE:latest"
+            echo "$IMAGE:sha-$SHA"
+            # Version tag only when we're actually releasing (empty on build_only).
+            if [ -n "${{ steps.version.outputs.version }}" ]; then
+              echo "$IMAGE:${{ steps.version.outputs.version }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "cache=$IMAGE:buildcache" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        if: ${{ success() && steps.cfg.outputs.registry != '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/single/Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ steps.cfg.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=registry,ref=${{ steps.cfg.outputs.cache }}
+          cache-to: type=registry,ref=${{ steps.cfg.outputs.cache }},mode=max
+
+      # ---- Publish the release: only reached if the build above succeeded -----
+
+      - name: Tag the release
+        if: ${{ success() && steps.version.outputs.release == 'true' }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "refs/tags/$VERSION"
+
+      - name: Create GitHub release
+        if: ${{ success() && steps.version.outputs.release == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/RELEASE_NOTES.md --verify-tag
+
+  # ---------------------------------------------------------------------------
+  # Promote: after a release is cut, open/refresh a prod bump PR in the GitOps
+  # repo pinning apps/<APP_NAME>/base/values.yaml to the just-released image sha.
+  # The image already exists (built in `release` above). A human reviews +
+  # merges the bump PR; merging is what actually deploys.
+  # Requires an INFRA_REPO repo variable ("<owner>/<repo>") and an INFRA_TOKEN
+  # secret (fine-grained PAT with contents + pull-requests write on that repo).
+  # Without them the job no-ops, so releases still succeed.
+  # ---------------------------------------------------------------------------
+  promote:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open/refresh prod bump PR in the infra repo
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_TOKEN }}
+          INFRA_REPO: ${{ vars.INFRA_REPO }}
+          INFRA_BASE: ${{ vars.INFRA_BASE || 'main' }}
+          SHA: ${{ github.sha }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ] || [ -z "${INFRA_REPO:-}" ]; then
+            echo "INFRA_TOKEN or INFRA_REPO not set — skipping prod promote."
+            exit 0
+          fi
+          BRANCH="promote/${APP_NAME}"
+          VALUES="apps/${APP_NAME}/base/values.yaml"
+
+          git clone --depth 1 -b "$INFRA_BASE" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${INFRA_REPO}.git" infra
+          cd infra
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+
+          # The pin line is ALWAYS `  tag: sha-...` (never latest). Rewrite it to
+          # the released full sha.
+          sed -i "s|^  tag: sha-.*|  tag: sha-${SHA}|" "$VALUES"
+          if git diff --quiet -- "$VALUES"; then
+            echo "values.yaml already at sha-${SHA}; nothing to promote."
+            exit 0
+          fi
+          git add "$VALUES"
+          git commit -m "chore(${APP_NAME}): promote ${VERSION} (sha-${SHA})"
+          git push -f origin "$BRANCH"
+
+          # Idempotent: the force-push above refreshes an existing PR in place.
+          if [ -z "$(gh pr list -R "$INFRA_REPO" --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create -R "$INFRA_REPO" --head "$BRANCH" --base "$INFRA_BASE" \
+              --title "chore(${APP_NAME}): promote ${VERSION}" \
+              --body "Automated prod image bump to \`sha-${SHA}\` (${VERSION}). Merging deploys."
+            echo "opened promote PR (${BRANCH} -> ${INFRA_BASE})"
+          else
+            echo "existing promote PR refreshed via force-push"
+          fi

@@ -1,0 +1,77 @@
+{
+  "name": "accit",
+  "private": true,
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "zod": "^4.6.7",
+      "typescript": "^6.0.3",
+      "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+      "vite": "8.3.5",
+      "vitest": "5.0.5"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev --filter=web",
+    "dev:web": "turbo run dev --filter=web",
+    "dev:server": "ACCIT_CONFIG=dev/accit.yaml scripts/cargo run -p server",
+    "web:check": "turbo run check --filter=web",
+    "web:build": "turbo run build --filter=web",
+    "web:test:unit": "turbo run test:unit --filter=web",
+    "web:test:component": "turbo run test:component --filter=web",
+    "web:test:e2e": "turbo run test:e2e --filter=web",
+    "web:test:a11y": "turbo run test:a11y --filter=web",
+    "build": "turbo run build --filter=web && scripts/cargo build --release -p server",
+    "lint": "oxlint && turbo run lint --filter=web",
+    "frontend:lint": "turbo run lint --filter=web",
+    "fallow": "npx fallow",
+    "fallow:dead-code": "npx fallow dead-code",
+    "fallow:dupes": "npx fallow dupes",
+    "fallow:health": "npx fallow health",
+    "fallow:fix:dry-run": "npx fallow fix --dry-run",
+    "fallow:staged": "npx fallow --format json",
+    "test": "turbo run test --filter=web && scripts/check-rust",
+    "format:write": "oxfmt --write",
+    "format:check": "oxfmt --check",
+    "typecheck": "turbo run typecheck --filter=web",
+    "check": "turbo run check --filter=web",
+    "fix": "bun run lint && bun run format:write",
+    "validate:prepush": "bun run lint && bun run typecheck",
+    "validate:ci": "bun run lint && bun run format:check && bun run typecheck && bun run build",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@accit/config": "workspace:*",
+    "@oxlint/plugins": "1.89.0",
+    "@types/node": "^24.19.2",
+    "@typescript/native-preview": "catalog:",
+    "fallow": "^3.33.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.88.0",
+    "oxlint-tsgolint": "^7.0.2004",
+    "turbo": "^2.11.8",
+    "typescript": "catalog:"
+  },
+  "lint-staged": {
+    "apps/web/**/*.svelte": [
+      "sh -c 'cd apps/web && bun run lint:staged -- \"$@\"' --"
+    ],
+    "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,json,jsonc}": [
+      "oxlint --format=json --no-error-on-unmatched-pattern",
+      "oxfmt --write --no-error-on-unmatched-pattern"
+    ],
+    "**/*.{ts,tsx,js,jsx,svelte,json,jsonc}": [
+      "sh -c 'bunx fallow audit --gate new-only --quiet'"
+    ]
+  },
+  "packageManager": "bun@1.4.3"
+}

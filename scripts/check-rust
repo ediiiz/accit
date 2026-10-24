@@ -1,0 +1,19 @@
+#!/bin/sh
+# Rust quality gate (CI and before commit): format, lints as errors, file length, tests.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+cargo=${CARGO:-"$root/scripts/cargo"}
+max_lines=300
+
+"$cargo" fmt --check
+"$cargo" clippy --workspace --all-targets -- -D warnings
+
+long=$(find "$root/crates" -name '*.rs' -exec wc -l {} + |
+  awk -v max="$max_lines" '$2 != "total" && $1 > max { print $2 " (" $1 " lines)" }')
+if [ -n "$long" ]; then
+  echo "Rust files over $max_lines lines; split them:" >&2
+  echo "$long" >&2
+  exit 1
+fi
+
+"$cargo" test --workspace

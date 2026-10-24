@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.fallow.tools/schema.json",
+  "ignorePatterns": [
+    "apps/web/src/lib/components/ui/**",
+    "tools/oxlint/anti-slop/**",
+    "vendor/**",
+    "target/**",
+    "**/*.gen.ts"
+  ],
+  "ignoreDependencies": ["bits-ui", "tailwind-variants", "@internationalized/date", "paneforge"],
+  "rules": {
+    "unused-dependencies": "warn",
+    "unused-dev-dependencies": "warn"
+  }
+}

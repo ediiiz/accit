@@ -1,0 +1,3 @@
+{
+  "extends": "@accit/config/tsconfig.base.json"
+}

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "portal_title": "Access",
+  "not_enabled_heading": "Access your apps.",
+  "not_enabled_body": "Enable access for your current connection."
+}

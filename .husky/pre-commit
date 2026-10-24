@@ -1,0 +1,2 @@
+bunx sync-claude-md sync --all --stage
+lint-staged

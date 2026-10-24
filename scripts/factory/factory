@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""Factory control plane: one JSON answer per call. Usage: scripts/factory/factory <command> [args]
+
+  setup                         create labels, slot dirs
+  status                        snapshot for one loop tick
+  claim <issue>                 take a free impl slot, new branch factory/<issue>
+  checkout <pr> impl|merge      take a free slot, check out the PR branch (fix or integrate)
+  release <slot>                free a slot and shrink it
+  route <issue> std|deep|split  record triage decision
+  run start|end <role> <target> track a slot-less agent (triage, reviewer, splitter)
+  opened <issue> <pr>           implementer finished: PR goes to review
+  verdict <pr> approve|changes  reviewers finished; posts .factory/reviews/<pr>-*.md
+  integrated <pr>               integrator pushed: PR waits for CI (if required), then merge
+  merge <pr>                    merge if CI allows and the branch contains the base tip; closes the issue
+  fail <issue> <reason>         count a failed attempt; human after max_attempts
+  human <number> <reason>       park for a person
+  split <parent> <file>...      create child tickets (first line "# title"); parent waits on them
+  guard-golden <pr>             golden fixtures touched outside oracle tickets?
+  renumber                      (inside a slot) move new migrations after the base's last number
+  gc [--aggressive]             disk cleanup
+"""
+
+import json
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from forge import Forge, blockers, issue_of_branch  # noqa: E402
+import slots  # noqa: E402
+
+CFG = json.loads((Path(__file__).resolve().parent / "config.json").read_text())
+
+
+def out(obj):
+    print(json.dumps(obj, indent=2, default=str))
+
+
+def milestone_key(issue):
+    ms = issue.get("milestone")
+    return (0, ms["title"]) if ms else (1, "")
+
+
+def frontier(issues, closed, state, active):
+    ready = []
+    for issue in issues:
+        labels = {lab["name"] for lab in issue["labels"]}
+        if "ready-for-agent" not in labels or labels & {"needs-info", "factory:split"}:
+            continue
+        if not issue.get("milestone"):  # umbrella specs carry no milestone
+            continue
+        if any(l.startswith("factory:") and l not in ("factory:deep", "factory:oracle") for l in labels):
+            continue
+        if issue["number"] in active or issue["assignee"]:
+            continue
+        if any(b not in closed for b in blockers(issue)):
+            continue
+        route = state["routes"].get(str(issue["number"])) or ("deep" if "factory:deep" in labels else None)
+        ready.append({"issue": issue["number"], "title": issue["title"],
+                      "milestone": (issue.get("milestone") or {}).get("title"), "route": route,
+                      "_key": (milestone_key(issue), issue["number"])})
+    ready.sort(key=lambda r: r.pop("_key"))
+    return ready
+
+
+def pr_pipeline(pulls, routes):
+    lanes = {"review": [], "changes": [], "approved": [], "merging": [], "untracked": []}
+    for pr in pulls:
+        issue = issue_of_branch(pr["head"]["ref"])
+        if issue is None:
+            continue
+        labels = {lab["name"] for lab in pr["labels"]}
+        lane = next((l.split(":")[1] for l in labels if l in
+                     ("factory:review", "factory:changes", "factory:approved", "factory:merging")), "untracked")
+        if "factory:human" in labels:
+            continue
+        lanes[lane].append({"pr": pr["number"], "issue": issue, "branch": pr["head"]["ref"],
+                            "title": pr["title"], "route": routes.get(str(issue), "std")})
+    return lanes
+
+
+def cmd_status(store, forge):
+    with store.locked() as state:
+        state.setdefault("routes", {})
+        issues, closed, pulls = forge.open_issues(), forge.closed_numbers(), forge.open_pulls()
+        active = {s.get("issue") for s in state["slots"].values()} | \
+                 {issue_of_branch(p["head"]["ref"]) for p in pulls}
+        lanes = pr_pipeline(pulls, state["routes"])
+        free = {k: [s for s in store.slot_ids(k) if s not in state["slots"]] for k in ("impl", "merge")}
+        now = int(time.time())
+        ready = frontier(issues, closed, state, active)
+        human = [i["number"] for i in issues if any(l["name"] == "factory:human" for l in i["labels"])]
+        out({"disk": slots.disk(store), "free_slots": free,
+             "busy_slots": {k: {**v, "age_min": (now - v["since"]) // 60} for k, v in state["slots"].items()},
+             "runs": {k: {**v, "age_min": (now - v["since"]) // 60} for k, v in state["runs"].items()},
+             "prs": lanes, "frontier": ready[:12], "frontier_size": len(ready), "human": human,
+             "done": not ready and not any(lanes.values()) and not state["slots"] and not state["runs"]})
+
+
+def take_slot(store, state, kind):
+    free = [s for s in store.slot_ids(kind) if s not in state["slots"]]
+    if not free:
+        raise SystemExit(f"no free {kind} slot")
+    return free[0]
+
+
+def cmd_claim(store, forge, issue):
+    issue = int(issue)
+    with store.locked() as state:
+        if slots.disk(store)["level"] != "green":
+            raise SystemExit("disk below pause threshold: run gc, dispatch nothing")
+        slot = take_slot(store, state, "impl")
+        state["slots"][slot] = {"issue": issue, "role": "implement", "since": int(time.time()),
+                                "branch": f"factory/{issue}"}
+    info = prepare_or_free(store, slot, branch=f"factory/{issue}", new_branch=True)
+    forge.set_state(issue, "factory:wip")
+    out({**info, "issue": issue, "attempt": attempts(store, issue)})
+
+
+def cmd_checkout(store, forge, pr, kind):
+    pr_obj = forge.call("GET", f"/pulls/{pr}")
+    branch = pr_obj["head"]["ref"]
+    with store.locked() as state:
+        if kind == "impl" and slots.disk(store)["level"] != "green":
+            raise SystemExit("disk below pause threshold: run gc, dispatch nothing")
+        slot = take_slot(store, state, kind)
+        state["slots"][slot] = {"issue": issue_of_branch(branch), "pr": int(pr), "since": int(time.time()),
+                                "role": "fix" if kind == "impl" else "integrate", "branch": branch}
+    info = prepare_or_free(store, slot, branch=branch)
+    if kind == "merge":
+        slots.ensure_db(store, slot, reset=True)
+    reviews = sorted(str(p) for p in (store.dir / "reviews").glob(f"{pr}-*.md"))
+    out({**info, "pr": int(pr), "issue": issue_of_branch(branch), "reviews": reviews})
+
+
+def prepare_or_free(store, slot, **kw):
+    try:
+        return slots.prepare(store, slot, **kw)
+    except BaseException:
+        with store.locked() as state:
+            state["slots"].pop(slot, None)
+        raise
+
+
+def cmd_release(store, slot):
+    with store.locked() as state:
+        state["slots"].pop(slot, None)
+    path = store.slot_path(slot)
+    if path.exists():
+        slots.sh("git", "switch", "-q", "--detach", cwd=path, check=False)
+        out(slots.clean_slot(store, slot))
+    else:
+        out({"slot": slot, "action": "none"})
+
+
+def attempts(store, issue):
+    with store.locked() as state:
+        return state["attempts"].get(str(issue), 0) + 1
+
+
+def bump_attempt(store, issue):
+    with store.locked() as state:
+        n = state["attempts"].get(str(issue), 0) + 1
+        state["attempts"][str(issue)] = n
+        return n
+
+
+def cmd_route(store, forge, issue, route):
+    with store.locked() as state:
+        state.setdefault("routes", {})[str(issue)] = route
+    if route in ("deep", "split"):
+        forge.ensure_labels()
+        forge.add_label(int(issue), f"factory:{route}")
+    out({"issue": int(issue), "route": route})
+
+
+def cmd_run(store, action, role, target):
+    key = f"{role}:{target}"
+    with store.locked() as state:
+        if action == "start":
+            state["runs"][key] = {"role": role, "target": target, "since": int(time.time())}
+        else:
+            state["runs"].pop(key, None)
+    out({"run": key, "action": action})
+
+
+def cmd_opened(store, forge, issue, pr):
+    forge.set_state(int(pr), "factory:review")
+    out({"issue": int(issue), "pr": int(pr), "lane": "review"})
+
+
+def cmd_verdict(store, forge, pr, verdict):
+    pr_obj = forge.call("GET", f"/pulls/{pr}")
+    issue = issue_of_branch(pr_obj["head"]["ref"])
+    parts = [p.read_text() for p in sorted((store.dir / "reviews").glob(f"{pr}-*.md"))]
+    forge.comment(int(pr), f"**Factory review: {verdict}**\n\n" + "\n\n---\n\n".join(parts))
+    if verdict == "approve":
+        forge.set_state(int(pr), "factory:approved")
+        out({"pr": int(pr), "lane": "approved"})
+        return
+    n = bump_attempt(store, issue)
+    if n >= CFG["max_attempts"]:
+        forge.set_state(int(pr), "factory:human")
+        forge.set_state(issue, "factory:human")
+        out({"pr": int(pr), "lane": "human", "attempts": n})
+        return
+    forge.set_state(int(pr), "factory:changes")
+    out({"pr": int(pr), "lane": "changes", "attempts": n})
+
+
+def cmd_integrated(store, forge, pr):
+    forge.set_state(int(pr), "factory:merging")
+    out({"pr": int(pr), "lane": "merging"})
+
+
+def contains_base(pr_obj):
+    root = slots.main_root()
+    slots.sh("git", "fetch", "-q", "origin", CFG["base"], pr_obj["head"]["ref"], cwd=root)
+    check = ["git", "merge-base", "--is-ancestor", f"origin/{CFG['base']}", pr_obj["head"]["sha"]]
+    return subprocess.run(check, cwd=root).returncode == 0
+
+
+def cmd_merge(store, forge, pr):
+    pr_obj = forge.call("GET", f"/pulls/{pr}")
+    state = forge.combined_status(pr_obj["head"]["sha"])
+    if CFG["require_ci"] and state in ("pending", "none"):
+        out({"pr": int(pr), "result": "wait", "ci": state})
+        return
+    if state in ("failure", "error"):
+        forge.set_state(int(pr), "factory:changes")
+        forge.comment(int(pr), "Factory: CI failed after integration; back to changes.")
+        out({"pr": int(pr), "result": "ci-failed", "ci": state})
+        return
+    if pr_obj.get("mergeable") is None:  # GitHub still computing mergeability
+        out({"pr": int(pr), "result": "wait", "ci": state})
+        return
+    if not pr_obj["mergeable"]:
+        forge.set_state(int(pr), "factory:approved")
+        out({"pr": int(pr), "result": "conflict", "ci": state})
+        return
+    if not contains_base(pr_obj):
+        # Gates ran on an older base; re-integrate so what merges is what was tested.
+        forge.set_state(int(pr), "factory:approved")
+        out({"pr": int(pr), "result": "stale", "ci": state})
+        return
+    forge.merge(int(pr), pr_obj["title"])
+    issue = issue_of_branch(pr_obj["head"]["ref"])
+    forge.call("PATCH", f"/issues/{issue}", {"state": "closed"})
+    forge.set_state(issue, None)
+    out({"pr": int(pr), "issue": issue, "result": "merged", "ci": state})
+
+
+def cmd_fail(store, forge, issue, reason):
+    n = bump_attempt(store, int(issue))
+    if n >= CFG["max_attempts"]:
+        forge.set_state(int(issue), "factory:human")
+        forge.comment(int(issue), f"Factory parked this after {n} attempts: {reason}")
+        out({"issue": int(issue), "lane": "human", "attempts": n})
+        return
+    forge.set_state(int(issue), None)
+    out({"issue": int(issue), "lane": "frontier", "attempts": n})
+
+
+def cmd_human(store, forge, number, reason):
+    forge.ensure_labels()
+    forge.set_state(int(number), "factory:human")
+    forge.comment(int(number), f"Factory needs a person: {reason}")
+    out({"number": int(number), "lane": "human"})
+
+
+def cmd_guard_golden(store, forge, pr):
+    pr_obj = forge.call("GET", f"/pulls/{pr}")
+    issue = issue_of_branch(pr_obj["head"]["ref"])
+    issue_obj = forge.call("GET", f"/issues/{issue}")
+    allowed = "oracle" in issue_obj["title"].lower() or \
+        any(l["name"] == "factory:oracle" for l in issue_obj["labels"])
+    slots.sh("git", "fetch", "-q", "origin", CFG["base"], pr_obj["head"]["ref"])
+    files = slots.sh("git", "diff", "--name-only",
+                     f"origin/{CFG['base']}...origin/{pr_obj['head']['ref']}").splitlines()
+    touched = [f for f in files if any(p in f for p in CFG["golden_paths"])]
+    out({"pr": int(pr), "golden_touched": touched, "allowed": allowed, "ok": allowed or not touched})
+
+
+def cmd_split(store, forge, parent, files):
+    parent_obj = forge.call("GET", f"/issues/{parent}")
+    milestone = (parent_obj.get("milestone") or {}).get("number")
+    children = []
+    for path in files:
+        title, _, body = Path(path).read_text().partition("\n")
+        issue = forge.call("POST", "/issues", {"title": title.lstrip("# ").strip(), "body": body.strip(),
+                                                "milestone": milestone,
+                                                "labels": ["ready-for-agent"]})
+        children.append(issue["number"])
+    body = parent_obj["body"] or ""
+    lines = "".join(f"- #{c}\n" for c in children)
+    body = body.rstrip() + ("\n" + lines if "## Blocked by" in body else f"\n\n## Blocked by\n\n{lines}")
+    body = body.replace("None (can start immediately)\n", "")
+    forge.call("PATCH", f"/issues/{parent}", {"body": body})
+    forge.comment(int(parent), "Factory split this ticket into " + ", ".join(f"#{c}" for c in children) +
+                  "; it now covers what remains after them.")
+    if "factory:split" in forge.labels_of(int(parent)):
+        forge.remove_label(int(parent), "factory:split")
+    with store.locked() as state:
+        state.setdefault("routes", {}).pop(str(parent), None)
+    out({"parent": int(parent), "children": children})
+
+
+def cmd_renumber():
+    base = f"origin/{CFG['base']}"
+    mig = "crates/model/migrations"
+    on_base = slots.sh("git", "ls-tree", "--name-only", f"{base}:{mig}").splitlines()
+    top = max((int(m[:4]) for m in on_base if re.match(r"\d{4}_", m)), default=0)
+    added = sorted(Path(p).name for p in slots.sh(
+        "git", "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD", "--", mig).splitlines())
+    moves = []
+    for i, name in enumerate(added, start=top + 1):
+        new = f"{i:04d}_{name[5:]}"
+        if new != name:
+            slots.sh("git", "mv", f"{mig}/{name}", f"{mig}/{new}")
+            moves.append([name, new])
+    out({"base_top": top, "moved": moves})
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    cmd, args = argv[0], argv[1:]
+    if cmd == "renumber":
+        cmd_renumber()
+        return
+    store, forge = slots.Store(CFG), Forge(CFG)
+    simple = {
+        "status": lambda: cmd_status(store, forge),
+        "claim": lambda: cmd_claim(store, forge, *args),
+        "checkout": lambda: cmd_checkout(store, forge, *args),
+        "release": lambda: cmd_release(store, *args),
+        "route": lambda: cmd_route(store, forge, *args),
+        "run": lambda: cmd_run(store, *args),
+        "opened": lambda: cmd_opened(store, forge, *args),
+        "verdict": lambda: cmd_verdict(store, forge, *args),
+        "integrated": lambda: cmd_integrated(store, forge, *args),
+        "merge": lambda: cmd_merge(store, forge, *args),
+        "fail": lambda: cmd_fail(store, forge, args[0], " ".join(args[1:])),
+        "human": lambda: cmd_human(store, forge, args[0], " ".join(args[1:])),
+        "guard-golden": lambda: cmd_guard_golden(store, forge, *args),
+        "split": lambda: cmd_split(store, forge, args[0], args[1:]),
+        "setup": lambda: out({"labels": forge.ensure_labels(), "state": str(store.file)}),
+    }
+    if cmd == "gc":
+        with store.locked() as state:
+            out(slots.gc(store, state, aggressive="--aggressive" in args))
+        return
+    if cmd not in simple:
+        raise SystemExit(f"unknown command {cmd}; see --help")
+    simple[cmd]()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

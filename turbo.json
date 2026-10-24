@@ -1,0 +1,49 @@
+{
+  "$schema": "https://v2-9-6.turborepo.dev/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**", ".svelte-kit/**", "build/**"],
+      "env": ["SKIP_ENV_VALIDATION"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "check": {
+      "dependsOn": ["^check"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "test": {
+      "dependsOn": ["^test"]
+    },
+    "test:unit": {},
+    "test:component": {},
+    "test:e2e": {},
+    "test:a11y": {},
+    "reset:data": {
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "//#dev:ai": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:setup": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "test:once": {
+      "dependsOn": ["^test:once"]
+    }
+  }
+}

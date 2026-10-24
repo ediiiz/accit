@@ -1,0 +1,99 @@
+name: Preview
+
+# App-code PR previews. On every push to an open PR this builds + pushes the PR
+# HEAD's single-container image tagged `sha-<full head sha>` to GHCR, then
+# comments the preview URL. A PR-generator in the GitOps setup (e.g. an Argo CD
+# ApplicationSet with the GitHub pull-request generator) deploys the prod
+# manifests with ONLY the image overridden to `sha-{{.head_sha}}`, live at
+# https://<APP_NAME>-app-<PR#>.<PREVIEW_DOMAIN>.
+#
+# Off until a PREVIEW_DOMAIN repo variable is set. Skipped for fork PRs, whose
+# token cannot push packages.
+#
+# ⚠ The tag MUST be the FULL 40-char head commit sha: the PR generator exposes
+# `{{.head_sha}}` as the full sha, and on `pull_request` events GITHUB_SHA is the
+# ephemeral test-merge commit (NOT the head), so we read
+# github.event.pull_request.head.sha explicitly.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+concurrency:
+  # newest push per PR wins; cancel superseded builds
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # The infra repo directory name (apps/<APP_NAME>/), which also drives the
+  # preview hostname. Defaults to this repo's name; set an APP_NAME repo
+  # variable to override.
+  APP_NAME: ${{ vars.APP_NAME || github.event.repository.name }}
+  PREVIEW_DOMAIN: ${{ vars.PREVIEW_DOMAIN }}
+
+jobs:
+  preview:
+    if: ${{ vars.PREVIEW_DOMAIN != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Resolve build settings
+        id: cfg
+        run: |
+          set -euo pipefail
+          # image = ghcr.io/{owner}/{repo} (lowercased, matches release.yml)
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          SHA="${{ github.event.pull_request.head.sha }}"   # FULL sha
+          echo "tag=$IMAGE:sha-$SHA" >> "$GITHUB_OUTPUT"
+          echo "cache=$IMAGE:buildcache" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/single/Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ steps.cfg.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
+          cache-from: type=registry,ref=${{ steps.cfg.outputs.cache }}
+          cache-to: type=registry,ref=${{ steps.cfg.outputs.cache }},mode=max
+
+      - name: Comment preview URL (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUM: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          MARK='<!-- app-preview -->'
+          URL="https://${APP_NAME}-app-${NUM}.${PREVIEW_DOMAIN}"
+          BODY=$(printf '%s\n### App preview\n- %s\n\nBuilt from this PR'"'"'s head image; deployed a few minutes after each push. Torn down when the PR closes.' "$MARK" "$URL")
+          CID=$(gh api --paginate "repos/$REPO/issues/$NUM/comments" \
+            --jq ".[] | select(.body | startswith(\"$MARK\")) | .id" | head -1)
+          if [ -n "$CID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$CID" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$NUM/comments" -f body="$BODY" >/dev/null
+          fi

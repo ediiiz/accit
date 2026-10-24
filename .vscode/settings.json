@@ -1,0 +1,26 @@
+{
+  "remote.autoForwardPorts": true,
+  "remote.autoForwardPortsSource": "process",
+  "remote.restoreForwardedPorts": true,
+  "remote.portsAttributes": {
+    "3000": {
+      "label": "api dev",
+      "onAutoForward": "notify"
+    },
+    "4096": {
+      "label": "opencode",
+      "onAutoForward": "notify"
+    },
+    "5173": {
+      "label": "web dev",
+      "onAutoForward": "notify"
+    },
+    "5432": {
+      "label": "postgres",
+      "onAutoForward": "silent"
+    }
+  },
+  "remote.otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  }
+}

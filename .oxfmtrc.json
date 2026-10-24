@@ -1,0 +1,22 @@
+{
+  "ignorePatterns": [
+    ".sqlx/**",
+    "vendor/**",
+    "target/**",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".deepwork/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**",
+    "**/_generated/**",
+    ".tmp-checks/**"
+  ]
+}

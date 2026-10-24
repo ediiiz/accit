@@ -1,0 +1,5 @@
+# Local development: `bun run dev:server`. The Vite dev server proxies /api to the portal listener.
+profile: test
+listen:
+  portal: 127.0.0.1:3000
+  verify: 127.0.0.1:3001

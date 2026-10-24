@@ -1,0 +1,49 @@
+# git-cliff configuration — drives changelog + semver bump for the release
+# flow (.github/workflows/release.yml). Versioning is derived from
+# Conventional Commits: feat -> minor, fix -> patch, `!`/BREAKING -> major.
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+header = ""
+body = """
+{% if version %}\
+## {{ version | trim_start_matches(pat="v") }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | upper_first }}\
+{% if commit.breaking %} **[breaking]**{% endif %} \
+([`{{ commit.id | truncate(length=7, end="") }}`]({{ get_env(name="GITHUB_SERVER_URL", default="") }}/{{ get_env(name="GITHUB_REPOSITORY", default="") }}/commit/{{ commit.id }}))
+{% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+# Only v-prefixed tags count as releases.
+tag_pattern = "v[0-9]*"
+protect_breaking_commits = true
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"
+
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Testing" },
+  { message = "^build", group = "Build System" },
+  { message = "^ci", skip = true },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^style", skip = true },
+  { body = ".*", group = "Other" },
+]

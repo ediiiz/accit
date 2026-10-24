@@ -1,0 +1,16 @@
+#!/bin/sh
+# Runs cargo in the pinned Rust image for hosts without OpenSSL headers or a C
+# toolchain. Hosts with both can call cargo directly; output lands in target/.
+# Host networking so tests reach the local Postgres on 127.0.0.1.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+image=accit-rust-dev:1.97
+docker image inspect "$image" >/dev/null 2>&1 ||
+  docker build --network host -q -t "$image" "$root/docker/rust-dev" >/dev/null
+exec docker run --rm -i --network host \
+  --user "$(id -u):$(id -g)" -e HOME=/tmp -e CARGO_HOME=/cargo \
+  -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-6}" \
+  -e ACCIT_CONFIG -e RUST_LOG -e RUST_BACKTRACE \
+  -e CARGO_INCREMENTAL -e CARGO_PROFILE_DEV_DEBUG -e CARGO_PROFILE_TEST_DEBUG \
+  -v accit-cargo:/cargo -v "$root":/work -w "/work${PWD#"$root"}" \
+  "$image" cargo "$@"

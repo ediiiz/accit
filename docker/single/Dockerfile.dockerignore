@@ -1,0 +1,56 @@
+# Dependencies (reinstalled inside the image)
+**/node_modules
+
+# Build artifacts
+**/build
+**/dist
+**/.svelte-kit
+**/.turbo
+**/*.tsbuildinfo
+
+# The Dockerfile prunes the repo itself; keep the context small
+Dockerfile
+.dockerignore
+
+# VCS / IDE / tooling
+.git
+.gitignore
+.vscode
+.idea
+.husky
+.slim
+.deepwork
+.opencode
+.agents
+.github
+.fallow
+.claude
+
+# Env files & secrets (inject at runtime, never bake in)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local junk
+core
+**/core.[0-9]*
+coverage
+**/*.log
+**/.DS_Store
+tmp
+temp
+.cache
+
+# Docs & samples not needed to build
+*.md
+sample
+openspec
+
+# Specs and legacy material (not part of any image)
+spec
+old_spec
+.tmp-checks
+
+# Rust build output
+target
+**/target
