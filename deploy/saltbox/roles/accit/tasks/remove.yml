@@ -1,5 +1,5 @@
 ---
-# Issue #16 decision 21. Traefik first: with accit gone, every route still referencing accit@file fails.
+# Traefik first: with accit gone, every route still referencing accit@file fails.
 - name: Remove | Inspect Traefik
   ansible.builtin.command: docker inspect {{ accit_traefik }}
   register: accit_traefik_inspect

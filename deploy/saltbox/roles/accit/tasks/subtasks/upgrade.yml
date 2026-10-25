@@ -1,7 +1,6 @@
 ---
-# docs/spec.md section 7 and issue #16 decision 8: copy the database before every tag change; a rollback
-# restores the copy from the older tag. The copy may hold Grants Revoked since, so a rollback discards Grants
-# (the restore procedure of docs/guides/operator.md section 7).
+# A migration may not run backwards, so every tag change keeps a copy and a rollback restores the older tag's.
+# That copy may hold Grants Revoked since: ready.yml discards them (docs/guides/operator.md section 7).
 - name: Upgrade | Stop accit
   ansible.builtin.include_tasks: "{{ resources_tasks_path }}/docker/remove_docker_container.yml"
   when: accit_upgrade.action in ['upgrade', 'rollback']

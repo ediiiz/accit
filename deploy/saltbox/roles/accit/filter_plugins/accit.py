@@ -60,12 +60,14 @@ def traefik_version_error(output, minimum):
     return ""
 
 
-def upgrade_plan(deployed, desired, copies):
-    """What happens to the database when the image moves from tag `deployed` ("" before the first
-    install) to `desired`. `copies` are the tags whose database copy exists."""
+def upgrade_plan(deployed, desired, copies, database):
+    """What happens to the database when the image moves from tag `deployed` ("" when none is recorded)
+    to `desired`. `copies` are the tags whose database copy exists; `database`: accit.db exists."""
     plan = {"action": "", "save": "", "restore": "", "error": ""}
     if _release(desired) is None:
         plan["error"] = f"accit_role_docker_image_tag must be an exact release such as v1.2.3, not {desired}"
+    elif not deployed and database:
+        plan.update(action="upgrade", save="untagged")
     elif not deployed:
         plan["action"] = "install"
     elif deployed == desired:
@@ -80,14 +82,28 @@ def upgrade_plan(deployed, desired, copies):
     return plan
 
 
+def config_change(live, new):
+    """What applies `new` over the running `live` accit.yaml (None when absent): "", "reload" or "restart".
+    `accit admin reload` swaps only `protection` and accepts other changes without applying them."""
+    if live is None:
+        return "restart"
+    if {**live, "protection": None} != {**new, "protection": None}:
+        return "restart"
+    return "reload" if live.get("protection") != new.get("protection") else ""
+
+
 def _hosts(rule):
     """The exact hosts a router rule names, canonical; ["*"] when it names none (it matches any host)."""
     hosts = [
-        host.lower().rstrip(".")
+        _canonical(host)
         for arguments in re.findall(r"\bHost\(([^)]*)\)", rule or "")
         for host in re.findall(r"`([^`]*)`", arguments)
     ]
     return hosts or ["*"]
+
+
+def _canonical(host):
+    return host.lower().rstrip(".")
 
 
 def _state(host, entrypoint, policy):
@@ -97,8 +113,8 @@ def _state(host, entrypoint, policy):
     if host == policy["portal"]:
         return "Open"
     if policy["mode"] == "selected":
-        return "Gated" if host in policy.get("hosts", []) else "Open"
-    return "Open" if host in policy.get("excluded_hosts", []) else "Gated"
+        return "Gated" if host in map(_canonical, policy.get("hosts", [])) else "Open"
+    return "Open" if host in map(_canonical, policy.get("excluded_hosts", [])) else "Gated"
 
 
 def coverage(routers, policy):
@@ -127,12 +143,39 @@ def chain_error(chain, delete):
     return ""
 
 
+def _denied(probe):
+    """accit's 403: status 403 with the body `Forbidden`."""
+    lines = probe["stdout"].splitlines()
+    return lines[-1:] == ["403"] and lines[:1] == ["Forbidden"]
+
+
+def public_probe(open_probe, gated_probe):
+    """Outcome of an Open and a Gated host requested through the host's public address (registered curl
+    results, status code on the last line). The Gated 403 counts only once the Open host proves the
+    request reached accit with a public Address: a non-public one is denied at step 3 on every host."""
+    if open_probe["rc"] != 0:
+        return {"outcome": "skipped", "reason": f"the Open host did not answer (curl exit {open_probe['rc']})"}
+    if _denied(open_probe):
+        return {
+            "outcome": "skipped",
+            "reason": "accit denied the Open host: the path does not carry a public Address",
+        }
+    if gated_probe["rc"] != 0:
+        return {"outcome": "failed", "reason": f"the Gated host did not answer (curl exit {gated_probe['rc']})"}
+    if not _denied(gated_probe):
+        code = gated_probe["stdout"].splitlines()[-1]
+        return {"outcome": "failed", "reason": f"the Gated host answered {code} without a Grant"}
+    return {"outcome": "passed", "reason": ""}
+
+
 class FilterModule:
     def filters(self):
         return {
             "accit_chain_error": chain_error,
+            "accit_config_change": config_change,
             "accit_coverage": coverage,
             "accit_overlapping": overlapping,
+            "accit_public_probe": public_probe,
             "accit_traefik_missing": traefik_missing,
             "accit_traefik_version_error": traefik_version_error,
             "accit_upgrade_plan": upgrade_plan,

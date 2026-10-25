@@ -23,7 +23,7 @@
   changed_when: accit_reload.rc == 0
   failed_when: accit_reload.rc != 0 and 'restart required' not in accit_reload.stderr
   when:
-    - accit_config_result is changed
+    - accit_config_change == 'reload'
     - accit_token_generated is skipped
     - create_docker_result is not changed
 
@@ -33,7 +33,7 @@
   changed_when: true
   when:
     - create_docker_result is not changed
-    - (accit_token_generated is changed) or (accit_reload.rc | default(0) != 0)
+    - (accit_token_generated is changed) or (accit_config_change == 'restart') or (accit_reload.rc | default(0) != 0)
 
 - name: Ready | Wait for /readyz after the restart
   ansible.builtin.uri:

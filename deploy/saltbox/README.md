@@ -2,11 +2,11 @@
 
 Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod. Spec: `../../docs/spec.md` sections 10 to 13. Trust model: `../../docs/adr/0002-trust-traefik-by-pinned-address-and-token.md`. Generic Traefik setup and day-to-day commands: `../../docs/guides/operator.md`.
 
-**Never run against a real Saltbox host.** `check` (below) is all that has run. The first real run should happen with the owner present; it stops by design at the Traefik wiring step.
+**Never run against a real Saltbox host**; only `check` (below) has run. The first run stops at the Traefik wiring step.
 
 ## Install
 
-1. Clone this repository on the host and link the role into saltbox_mod (`sb install saltbox-mod` first if `/opt/saltbox_mod` is missing). Link, do not copy: `files/client-ca` is a symlink to `scripts/client-ca`.
+1. Clone this repository on the host and link the role into saltbox_mod (`sb install saltbox-mod` first if `/opt/saltbox_mod` is missing). The repository is private: clone with GitHub credentials. Link, do not copy: `files/client-ca` is a symlink to `scripts/client-ca`.
 
    ```sh
    sudo git clone https://github.com/ediiiz/accit.git /srv/git/accit
@@ -49,7 +49,7 @@ Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod.
 | `accit_role_traefik_alias_headers_strategy`  | `delete`          | `aliasHeadersStrategy` on `websecure`; affects every app there (spec section 10)                         |
 | `accit_role_client_ca_file`                  | `""`              | your own client CA certificate on the host; empty = the role generates CA and shared certificate         |
 
-`accit.yaml` is rendered from these on every run (`profile: production`), checked with the pinned image's `accit admin check`, then applied with `accit admin reload`; a change reload refuses (`restart required`) restarts accit. `docker_networks` lists every Docker subnet present at the time of the run.
+`accit.yaml` is rendered from these on every run (`profile: production`) and checked with the pinned image's `accit admin check`. A change to `protection` alone is applied with `accit admin reload`; any other change restarts accit, since reload applies only `protection`. `docker_networks` lists every Docker subnet present at the time of the run.
 
 Gated hosts must not be Cloudflare-proxied: accit would see Cloudflare's address instead of the client's (spec section 1).
 
@@ -82,23 +82,24 @@ After a client CA rotation, `docker restart traefik` closes Portal connections m
 
 Change `accit_role_docker_image_tag` and re-run. Before every tag change the role stops accit and copies the database to `/opt/accit/backups/accit-<old tag>.db`. Going back to an older tag restores the copy taken when that tag was left, then discards its Grants (`accit admin recover --discard-grants`): the copy may hold Grants Revoked since. A downgrade without a copy is refused.
 
-Re-running with the same tag does not restart accit: it gates every app on `websecure`, so each restart is an outage for all of them.
+Re-running with the same tag and an unchanged config does not restart accit: each restart is an outage for every app on `websecure`. Without a recorded tag, an existing database is copied to `accit-untagged.db` first.
 
 ## Checks
 
-Every deploy ends with these; any failure fails the run:
+Any failure fails the run:
 
 - Traefik's wiring: `accit@file` on `websecure`, `aliasHeadersStrategy`, `core.strictTLSOptions=true`, its pinned address on the `accit` network
 - Traefik v3.7.16 or later, accit at its pinned address, `accit admin check` exits 0, `/readyz`
-- the `accit@file` chain Traefik loaded sets the token, verifies and deletes the token
-- a Gated host from Traefik's routers answers `403 Forbidden` without a Grant
-- the Portal fails the TLS handshake without the client certificate and answers with it
+- the `accit@file` chain Traefik loaded sets, verifies, then deletes the token
+- a Gated host answers `403 Forbidden` to the host itself
+- through the host's public address (`ip_address_public`), an Open host passes and a Gated host answers `403 Forbidden`; reported as skipped when the Open host does not pass, so the path does not carry a public Address
+- the Portal presents a server certificate, fails the TLS handshake without the client certificate, and answers with the generated one
 
-Requests come from the host, so accit sees a Docker address, which `profile: production` refuses; no request from the host passes the gate. The token's removal before an app is therefore checked on the chain Traefik loaded, and end to end only in the Compose harness (`crates/e2e`).
+From the host itself accit sees a Docker address and refuses it at the Address check, so only the public-address probe reaches the Policy. No Saltbox app echoes request headers: the token's removal is checked on the loaded chain, end to end only in the Compose harness (`crates/e2e`).
 
-Then a coverage report (informational): every router from Traefik's API as host, entrypoint, Gated / Open / Uncovered, by the rule of `accit admin check`. Only `websecure` carries the chain; routers on `web`, `internal`, `tailscale-websecure` and others are Uncovered.
+Then a coverage report: every router as host, entrypoint, Gated / Open / Uncovered, by the rule of `accit admin check`. Only `websecure` carries the chain; routers on other entrypoints, `tailscale-websecure` included, are Uncovered.
 
-Saltbox's `traefik-internal` router serves Traefik's API without authentication on the `saltbox` network, so any container there can read the proxy token. accit still accepts only Traefik's pinned address on the `accit` network (ADR 0002); the role prints this after every deploy.
+Saltbox's `traefik-internal` router serves Traefik's API without authentication on the `saltbox` network, so any container there can read the proxy token. accit still accepts only Traefik's pinned address on the `accit` network (ADR 0002).
 
 ## Remove
 
@@ -110,4 +111,4 @@ Saltbox's `traefik-internal` router serves Traefik's API without authentication 
 deploy/saltbox/check
 ```
 
-Runs the filter tests (`tests/test_filters.py`), yamllint, the syntax check, renders the templates against `tests/inventory/` and compares them with `tests/expected/`, then ansible-lint. Needs `python3` and `uv`; the first run downloads the Ansible versions Saltbox pins. Not part of `scripts/ci`: it needs the network once. Molecule tests follow once Docker can run containers on the build host.
+Runs the filter tests, yamllint, the syntax check, renders the templates against `tests/inventory/` and compares them with `tests/expected/`, then ansible-lint. Needs `python3` and `uv`; the first run downloads Ansible, so it stays out of `scripts/ci`.

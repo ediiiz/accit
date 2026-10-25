@@ -8,7 +8,7 @@
 - name: Set paths
   ansible.builtin.set_fact:
     accit_container: "{{ lookup('role_var', '_docker_container', role='accit') }}"
-    accit_traefik: "{{ lookup('role_var', '_traefik_container', role='accit') }}"
+    accit_traefik: traefik
     accit_location: "{{ lookup('role_var', '_paths_location', role='accit') }}"
     accit_config_dir: "{{ lookup('role_var', '_paths_config_lookup', role='accit') }}"
     accit_data_dir: "{{ lookup('role_var', '_paths_data_lookup', role='accit') }}"

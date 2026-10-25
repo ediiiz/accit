@@ -1,5 +1,5 @@
 #!/bin/sh
-# Verifies the Saltbox role off a Saltbox host (issue #16 decision 23): filter tests, yamllint, syntax check,
+# Verifies the Saltbox role off a Saltbox host: filter tests, yamllint, syntax check,
 # templates rendered against tests/inventory/, ansible-lint. Never runs the role: that needs Saltbox and Docker.
 # Needs python3 and uv; the first run downloads the Ansible versions Saltbox pins (requirements-saltbox.txt).
 set -eu

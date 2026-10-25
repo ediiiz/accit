@@ -69,7 +69,6 @@ accit_role_dns_proxy: false
 # Traefik
 ################################
 
-accit_role_traefik_container: "traefik"
 accit_role_traefik_certresolver: "{{ traefik_default_certresolver }}"
 # Applies to every app on websecure (docs/spec.md section 10).
 accit_role_traefik_alias_headers_strategy: "delete"
@@ -91,7 +90,6 @@ accit_role_network_accit_address: "172.31.250.3"
 accit_role_docker_container: "{{ accit_name }}"
 
 # Image: an exact release tag such as v1.2.3; required.
-accit_role_docker_image_pull: true
 accit_role_docker_image_repo: "ghcr.io/ediiiz/accit"
 accit_role_docker_image_tag: ""
 accit_role_docker_image: "{{ lookup('role_var', '_docker_image_repo', role='accit') }}:{{ lookup('role_var', '_docker_image_tag', role='accit') }}"
@@ -123,9 +121,6 @@ accit_role_docker_security_opts:
   - "no-new-privileges:true"
 accit_role_docker_tmpfs:
   - "/tmp:size=16m,mode=1777"
-
-# Restart Policy
-accit_role_docker_restart_policy: unless-stopped
 
 ################################
 # Config

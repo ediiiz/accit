@@ -97,11 +97,18 @@ class TraefikVersion(unittest.TestCase):
 
 
 class UpgradePlan(unittest.TestCase):
-    def plan(self, deployed, desired, copies=()):
-        return accit.upgrade_plan(deployed, desired, list(copies))
+    def plan(self, deployed, desired, copies=(), database=True):
+        return accit.upgrade_plan(deployed, desired, list(copies), database)
 
     def test_first_install_copies_nothing(self):
-        self.assertEqual(self.plan("", "v1.0.0"), {"action": "install", "save": "", "restore": "", "error": ""})
+        self.assertEqual(
+            self.plan("", "v1.0.0", database=False), {"action": "install", "save": "", "restore": "", "error": ""}
+        )
+
+    def test_a_database_without_a_recorded_tag_is_copied(self):
+        self.assertEqual(
+            self.plan("", "v1.0.0"), {"action": "upgrade", "save": "untagged", "restore": "", "error": ""}
+        )
 
     def test_the_same_tag_keeps_the_database(self):
         self.assertEqual(self.plan("v1.0.0", "v1.0.0")["action"], "keep")
@@ -194,6 +201,16 @@ class Coverage(unittest.TestCase):
         routers = [router("whoami@docker", "Host(`whoami.example.com`)", [])]
         self.assertEqual(self.states(routers, ALL), [("whoami.example.com", "(all)", "Uncovered")])
 
+    def test_policy_hosts_compare_canonical(self):
+        routers = [
+            router("jellyfin@docker", "Host(`jellyfin.example.com`)", ["websecure"]),
+            router("status@docker", "Host(`status.example.com`)", ["websecure"]),
+        ]
+        selected = {**SELECTED, "hosts": ["Jellyfin.Example.com."]}
+        all_mode = {**ALL, "excluded_hosts": ["STATUS.example.com."]}
+        self.assertEqual(self.states(routers[:1], selected), [("jellyfin.example.com", "websecure", "Gated")])
+        self.assertEqual(self.states(routers[1:], all_mode), [("status.example.com", "websecure", "Open")])
+
     def test_each_host_of_a_combined_rule_is_a_row(self):
         routers = [router("a@docker", "Host(`a.example.com`) || Host(`jellyfin.example.com`)", ["websecure"])]
         self.assertEqual(
@@ -236,6 +253,82 @@ class LoadedChain(unittest.TestCase):
     def test_a_disabled_middleware_fails(self):
         self.assertEqual(
             accit.chain_error(chain(MEMBERS, status="disabled"), delete(BLANK)), "accit@file is disabled in Traefik"
+        )
+
+
+LIVE = {
+    "profile": "production",
+    "title": "Zugang",
+    "apps": [{"name": "Jellyfin", "url": "https://jellyfin.example.com"}],
+    "protection": {"mode": "selected", "hosts": ["jellyfin.example.com"]},
+}
+
+
+def changed(**keys):
+    return {**LIVE, **keys}
+
+
+class ConfigChange(unittest.TestCase):
+    """`accit admin reload` applies only `protection`; any other key needs a restart."""
+
+    def test_an_unchanged_config_needs_nothing(self):
+        self.assertEqual(accit.config_change(LIVE, changed()), "")
+
+    def test_a_policy_change_is_reloaded(self):
+        self.assertEqual(accit.config_change(LIVE, changed(protection={"mode": "all"})), "reload")
+
+    def test_an_app_link_change_restarts(self):
+        self.assertEqual(accit.config_change(LIVE, changed(apps=[])), "restart")
+
+    def test_a_new_key_restarts(self):
+        self.assertEqual(accit.config_change(LIVE, changed(grant_duration="7d")), "restart")
+
+    def test_a_policy_and_title_change_restarts(self):
+        self.assertEqual(
+            accit.config_change(LIVE, changed(title="accit", protection={"mode": "all"})), "restart"
+        )
+
+    def test_no_live_config_restarts(self):
+        self.assertEqual(accit.config_change(None, LIVE), "restart")
+
+
+def answer(code, body="", rc=0):
+    """A registered curl result: body, then the status code on its own line."""
+    return {"rc": rc, "stdout": f"{body}\n{code}"}
+
+
+DENIED = answer(403, "Forbidden")
+
+
+class PublicProbe(unittest.TestCase):
+    """Spec section 5: from a public Address without a Grant, a Gated host answers 403; skipped, never
+    passed, when the host's own public path does not reach accit with a public Address."""
+
+    def test_open_passes_and_gated_is_denied(self):
+        self.assertEqual(accit.public_probe(answer(200, "<html>"), DENIED), {"outcome": "passed", "reason": ""})
+
+    def test_an_unreachable_public_address_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(answer("000", rc=7), answer("000", rc=7)),
+            {"outcome": "skipped", "reason": "the Open host did not answer (curl exit 7)"},
+        )
+
+    def test_an_open_host_denied_by_accit_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(DENIED, DENIED),
+            {"outcome": "skipped", "reason": "accit denied the Open host: the path does not carry a public Address"},
+        )
+
+    def test_a_gated_host_answering_without_a_grant_fails(self):
+        self.assertEqual(
+            accit.public_probe(answer(200), answer(200, "<html>")),
+            {"outcome": "failed", "reason": "the Gated host answered 200 without a Grant"},
+        )
+
+    def test_a_gated_host_that_does_not_answer_fails(self):
+        self.assertEqual(
+            accit.public_probe(answer(302), answer("000", rc=28)),
+            {"outcome": "failed", "reason": "the Gated host did not answer (curl exit 28)"},
         )
 
 
