@@ -9,10 +9,10 @@
   when: accit_upgrade.action == 'rollback'
 
 - name: Ready | Wait for /readyz
-  ansible.builtin.uri:
-    url: "{{ accit_ready_url }}"
+  ansible.builtin.command: docker exec {{ accit_container }} /accit ready
   register: accit_ready
-  until: accit_ready.status == 200
+  until: accit_ready.rc == 0
+  changed_when: false
   retries: 30
   delay: 2
 
@@ -36,10 +36,10 @@
     - (accit_token_generated is changed) or (accit_config_change == 'restart') or (accit_reload.rc | default(0) != 0)
 
 - name: Ready | Wait for /readyz after the restart
-  ansible.builtin.uri:
-    url: "{{ accit_ready_url }}"
+  ansible.builtin.command: docker exec {{ accit_container }} /accit ready
   register: accit_ready
-  until: accit_ready.status == 200
+  until: accit_ready.rc == 0
+  changed_when: false
   retries: 30
   delay: 2
   when: accit_restart is not skipped

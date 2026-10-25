@@ -17,6 +17,7 @@ const USAGE: &str = "Usage: accit [command]
 
   serve         Portal and verification listeners (default).
   healthcheck   Exit 0 when the local verification listener answers /healthz.
+  ready         Exit 0 when the local verification listener answers /readyz.
   admin list    Active Grants: Address and expiry.
   admin revoke <address>
                 Revoke the Grant of one Address.
@@ -33,7 +34,7 @@ const USAGE: &str = "Usage: accit [command]
 
 Configuration: $ACCIT_CONFIG, else /config/accit.yaml.";
 
-async fn healthcheck(config: &Config) -> Result<()> {
+async fn probe(config: &Config, path: &str) -> Result<()> {
     let mut address = config.listen.verify;
 
     if address.ip().is_unspecified() {
@@ -42,14 +43,16 @@ async fn healthcheck(config: &Config) -> Result<()> {
 
     let mut stream = tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(address))
         .await
-        .context("healthcheck timed out")??;
-    stream.write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").await?;
+        .context("probe timed out")??;
+    stream
+        .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes())
+        .await?;
 
     let mut status = [0_u8; 12];
     stream.read_exact(&mut status).await?;
 
     if &status != b"HTTP/1.1 200" {
-        bail!("unhealthy: {}", String::from_utf8_lossy(&status));
+        bail!("{path}: {}", String::from_utf8_lossy(&status));
     }
 
     Ok(())
@@ -109,7 +112,8 @@ pub async fn run(args: &[String]) -> Result<()> {
     match command {
         "serve" => serve().await,
         "admin" => admin(rest).await,
-        "healthcheck" => healthcheck(&Config::load(&config::path_from_env())?).await,
+        "healthcheck" => probe(&Config::load(&config::path_from_env())?, "/healthz").await,
+        "ready" => probe(&Config::load(&config::path_from_env())?, "/readyz").await,
         "-h" | "--help" | "help" => help(),
         _ => bail!("unknown command {command:?}\n\n{USAGE}"),
     }

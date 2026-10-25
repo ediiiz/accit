@@ -38,7 +38,7 @@ async fn the_ipv4_mapped_form_of_the_proxy_address_passes() {
 
 #[tokio::test]
 async fn other_peers_are_forbidden_on_every_verification_path() {
-    for peer in ["172.30.0.3", "10.0.0.1", "127.0.0.1", "203.0.113.9", "2001:db8::2", "::ffff:172.30.0.3"] {
+    for peer in ["172.30.0.3", "10.0.0.1", "203.0.113.9", "2001:db8::2", "::ffff:172.30.0.3"] {
         for path in ["/verify", "/readyz", "/nope"] {
             let call = send(verify_router(production()).await, Some(peer), path, &FROM_PROXY).await;
 
@@ -86,22 +86,24 @@ async fn not_ready_answers_503_before_the_peer_is_checked() {
 }
 
 #[tokio::test]
-async fn the_image_healthcheck_from_loopback_needs_no_token() {
+async fn the_local_probes_from_loopback_need_no_token() {
     for peer in ["127.0.0.1", "::1", "127.0.0.2"] {
         assert_eq!(verify_status(Some(peer), "/healthz", &[]).await, StatusCode::OK, "{peer}");
+        assert_ne!(verify_status(Some(peer), "/readyz", &[]).await, StatusCode::FORBIDDEN, "{peer}");
     }
 }
 
 #[tokio::test]
-async fn the_loopback_exemption_covers_only_healthz() {
-    for path in ["/verify", "/readyz", "/healthz/x", "/nope"] {
+async fn the_loopback_exemption_covers_only_the_probes() {
+    for path in ["/verify", "/healthz/x", "/readyz/x", "/nope"] {
         assert_eq!(verify_status(Some("127.0.0.1"), path, &[]).await, StatusCode::FORBIDDEN, "{path}");
     }
 }
 
 #[tokio::test]
-async fn healthz_from_elsewhere_still_needs_the_proxy() {
+async fn the_probes_from_elsewhere_still_need_the_proxy() {
     assert_eq!(verify_status(Some("172.30.0.3"), "/healthz", &[]).await, StatusCode::FORBIDDEN);
+    assert_eq!(verify_status(Some("172.30.0.3"), "/readyz", &[]).await, StatusCode::FORBIDDEN);
     assert_eq!(verify_status(Some(PROXY), "/healthz", &[]).await, StatusCode::FORBIDDEN);
     assert_eq!(verify_status(Some(PROXY), "/healthz", &FROM_PROXY).await, StatusCode::OK);
 }
@@ -203,7 +205,7 @@ async fn the_test_profile_still_enforces_what_is_configured() {
     let pinned = format!("{TEST_PROFILE}trusted_proxy: {PROXY}\nproxy_token_file: /t\n");
     let app = async || verify_router(trust(&pinned)).await;
 
-    assert_eq!(send(app().await, Some("127.0.0.1"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send(app().await, Some("172.30.0.3"), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
     assert_eq!(send(app().await, Some(PROXY), "/readyz", &[]).await.status, StatusCode::FORBIDDEN);
     assert_eq!(send(app().await, Some(PROXY), "/readyz", &FROM_PROXY).await.status, StatusCode::OK);
 }
