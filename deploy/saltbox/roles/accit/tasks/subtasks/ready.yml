@@ -43,3 +43,8 @@
   retries: 30
   delay: 2
   when: accit_restart is not skipped
+
+- name: Ready | Clear the pending change
+  ansible.builtin.file:
+    path: "{{ accit_location }}/config-pending"
+    state: absent

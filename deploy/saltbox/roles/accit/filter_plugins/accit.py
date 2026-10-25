@@ -1,6 +1,7 @@
 """Filters of the accit role. Pure functions; tests in deploy/saltbox/tests/test_filters.py."""
 
 import ipaddress
+import json
 import re
 
 
@@ -12,6 +13,17 @@ def overlapping(subnet, others):
         for other in others
         if ipaddress.ip_network(other).version == own.version and ipaddress.ip_network(other).overlaps(own)
     ]
+
+
+def pinned_address_error(address, subnet):
+    """Why `address` cannot be pinned on a Docker network with `subnet`, or ""."""
+    network = ipaddress.ip_network(subnet)
+    hosts = list(network.hosts())
+    if ipaddress.ip_address(address) not in hosts:
+        return f"{address} is not a host address in {subnet}"
+    if ipaddress.ip_address(address) == hosts[0]:
+        return f"{address} is Docker's gateway in {subnet}"
+    return ""
 
 
 def _flags(container):
@@ -41,6 +53,22 @@ def traefik_missing(container, network, address, alias_strategy):
         (pinned == address and attached.get("IPAddress") == address, f"{network} network address {address}"),
     ]
     return [setting for held, setting in checks if not held]
+
+
+def traefik_websecure(container):
+    """Where the host reaches Traefik's websecure entrypoint: its published IPv4 binding, loopback when it
+    binds every address. With userland-proxy off, Docker forwards only the bound address."""
+    port = _flags(container).get("--entrypoints.websecure.address", ":443").rpartition(":")[2]
+    bindings = ((container.get("HostConfig") or {}).get("PortBindings") or {}).get(f"{port}/tcp") or []
+    ipv4 = [binding for binding in bindings if ":" not in (binding.get("HostIp") or "")]
+    if not ipv4:
+        return {"address": "", "port": "", "error": f"Traefik publishes no IPv4 host port for websecure ({port}/tcp)"}
+    host = ipv4[0].get("HostIp") or ""
+    return {
+        "address": "127.0.0.1" if host in ("", "0.0.0.0") else host,
+        "port": ipv4[0]["HostPort"],
+        "error": "",
+    }
 
 
 def _release(text):
@@ -82,14 +110,14 @@ def upgrade_plan(deployed, desired, copies, database):
     return plan
 
 
-def config_change(live, new):
+def config_change(live, new, pending=""):
     """What applies `new` over the running `live` accit.yaml (None when absent): "", "reload" or "restart".
-    `accit admin reload` swaps only `protection` and accepts other changes without applying them."""
-    if live is None:
+    `accit admin reload` swaps only `protection` and accepts other changes without applying them.
+    `pending` is the action a failed earlier run wrote but never applied."""
+    if live is None or {**live, "protection": None} != {**new, "protection": None}:
         return "restart"
-    if {**live, "protection": None} != {**new, "protection": None}:
-        return "restart"
-    return "reload" if live.get("protection") != new.get("protection") else ""
+    change = "reload" if live.get("protection") != new.get("protection") else ""
+    return max(change, pending.strip(), key=["", "reload", "restart"].index)
 
 
 def _hosts(rule):
@@ -149,23 +177,29 @@ def _denied(probe):
     return lines[-1:] == ["403"] and lines[:1] == ["Forbidden"]
 
 
-def public_probe(open_probe, gated_probe):
-    """Outcome of an Open and a Gated host requested through the host's public address (registered curl
-    results, status code on the last line). The Gated 403 counts only once the Open host proves the
-    request reached accit with a public Address: a non-public one is denied at step 3 on every host."""
-    if open_probe["rc"] != 0:
-        return {"outcome": "skipped", "reason": f"the Open host did not answer (curl exit {open_probe['rc']})"}
-    if _denied(open_probe):
-        return {
-            "outcome": "skipped",
-            "reason": "accit denied the Open host: the path does not carry a public Address",
-        }
+def public_probe(status_probe, gated_probe):
+    """Outcome of the Portal's /api/status and a Gated host, both requested through the host's public
+    address (registered curl results, status code on the last line). The Gated host is judged only when the
+    Portal reports a public Address that neither a Trusted network nor a Grant lets through (spec section 3)."""
+    if status_probe["rc"] != 0:
+        return {"outcome": "skipped", "reason": f"the Portal did not answer (curl exit {status_probe['rc']})"}
+    *body, code = status_probe["stdout"].splitlines()
+    if code == "403":
+        return {"outcome": "skipped", "reason": "accit sees no public Address on this path"}
+    if code != "200":
+        return {"outcome": "skipped", "reason": f"the Portal answered {code}"}
+    status = json.loads("\n".join(body))
+    address = status["address"]
+    if status["state"] == "trusted":
+        return {"outcome": "skipped", "reason": f"{address} is in a Trusted network"}
+    if status["state"] == "active":
+        return {"outcome": "skipped", "reason": f"{address} holds a Grant"}
     if gated_probe["rc"] != 0:
         return {"outcome": "failed", "reason": f"the Gated host did not answer (curl exit {gated_probe['rc']})"}
     if not _denied(gated_probe):
         code = gated_probe["stdout"].splitlines()[-1]
-        return {"outcome": "failed", "reason": f"the Gated host answered {code} without a Grant"}
-    return {"outcome": "passed", "reason": ""}
+        return {"outcome": "failed", "reason": f"the Gated host answered {code} to {address} without a Grant"}
+    return {"outcome": "passed", "reason": f"{address} without a Grant"}
 
 
 class FilterModule:
@@ -175,8 +209,10 @@ class FilterModule:
             "accit_config_change": config_change,
             "accit_coverage": coverage,
             "accit_overlapping": overlapping,
+            "accit_pinned_address_error": pinned_address_error,
             "accit_public_probe": public_probe,
             "accit_traefik_missing": traefik_missing,
             "accit_traefik_version_error": traefik_version_error,
+            "accit_traefik_websecure": traefik_websecure,
             "accit_upgrade_plan": upgrade_plan,
         }

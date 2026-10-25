@@ -4,6 +4,7 @@ Expected values come from issue #16 (decisions 5, 8, 15, 17, 18, 22) and docs/sp
 Run: python3 -m unittest discover -s deploy/saltbox/tests
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -22,6 +23,29 @@ class Overlaps(unittest.TestCase):
 
     def test_a_contained_subnet_overlaps(self):
         self.assertEqual(accit.overlapping("172.31.250.0/29", ["172.31.250.4/30"]), ["172.31.250.4/30"])
+
+
+class PinnedAddress(unittest.TestCase):
+    """Docker reserves a subnet's first host for its gateway."""
+
+    def error(self, address):
+        return accit.pinned_address_error(address, "172.31.250.0/29")
+
+    def test_a_host_address_past_the_gateway_is_pinnable(self):
+        self.assertEqual(self.error("172.31.250.2"), "")
+        self.assertEqual(self.error("172.31.250.6"), "")
+
+    def test_the_network_address_is_refused(self):
+        self.assertEqual(self.error("172.31.250.0"), "172.31.250.0 is not a host address in 172.31.250.0/29")
+
+    def test_the_broadcast_address_is_refused(self):
+        self.assertEqual(self.error("172.31.250.7"), "172.31.250.7 is not a host address in 172.31.250.0/29")
+
+    def test_the_gateway_is_refused(self):
+        self.assertEqual(self.error("172.31.250.1"), "172.31.250.1 is Docker's gateway in 172.31.250.0/29")
+
+    def test_an_address_outside_the_subnet_is_refused(self):
+        self.assertEqual(self.error("172.31.251.2"), "172.31.251.2 is not a host address in 172.31.250.0/29")
 
 
 WIRED_COMMAND = [
@@ -75,6 +99,51 @@ class TraefikWiring(unittest.TestCase):
     def test_strict_tls_options_set_false_is_missing(self):
         command = [flag for flag in WIRED_COMMAND if "strict" not in flag] + ["--core.strictTLSOptions=false"]
         self.assertEqual(self.missing(traefik(command, on_accit("172.31.250.2"))), ["--core.strictTLSOptions=true"])
+
+
+def published(command, bindings):
+    return {"Config": {"Cmd": command}, "HostConfig": {"PortBindings": bindings}}
+
+
+class WebsecureBinding(unittest.TestCase):
+    """Where the host reaches Traefik's websecure entrypoint (Saltbox roles/traefik/defaults/main.yml)."""
+
+    def test_saltbox_default_binds_every_address(self):
+        container = published(
+            WIRED_COMMAND,
+            {"443/tcp": [{"HostIp": "", "HostPort": "443"}], "443/udp": [{"HostIp": "", "HostPort": "443"}]},
+        )
+        self.assertEqual(accit.traefik_websecure(container), {"address": "127.0.0.1", "port": "443", "error": ""})
+
+    def test_tailscale_binds_the_public_address_only(self):
+        container = published(
+            WIRED_COMMAND,
+            {
+                "443/tcp": [{"HostIp": "203.0.113.7", "HostPort": "443"}],
+                "444/tcp": [{"HostIp": "100.64.0.1", "HostPort": "443"}],
+            },
+        )
+        self.assertEqual(
+            accit.traefik_websecure(container), {"address": "203.0.113.7", "port": "443", "error": ""}
+        )
+
+    def test_a_custom_websecure_port_is_followed(self):
+        command = [flag.replace(":443", ":8443") for flag in WIRED_COMMAND]
+        container = published(command, {"8443/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8443"}]})
+        self.assertEqual(accit.traefik_websecure(container), {"address": "127.0.0.1", "port": "8443", "error": ""})
+
+    def test_an_ipv6_only_binding_is_skipped_for_ipv4(self):
+        container = published(
+            WIRED_COMMAND,
+            {"443/tcp": [{"HostIp": "2001:db8::7", "HostPort": "443"}, {"HostIp": "", "HostPort": "443"}]},
+        )
+        self.assertEqual(accit.traefik_websecure(container), {"address": "127.0.0.1", "port": "443", "error": ""})
+
+    def test_an_unpublished_websecure_port_is_an_error(self):
+        container = published(WIRED_COMMAND, {"80/tcp": [{"HostIp": "", "HostPort": "80"}]})
+        self.assertEqual(
+            accit.traefik_websecure(container)["error"], "Traefik publishes no IPv4 host port for websecure (443/tcp)"
+        )
 
 
 def version_output(version):
@@ -291,6 +360,18 @@ class ConfigChange(unittest.TestCase):
     def test_no_live_config_restarts(self):
         self.assertEqual(accit.config_change(None, LIVE), "restart")
 
+    def test_a_pending_reload_survives_an_unchanged_file(self):
+        self.assertEqual(accit.config_change(LIVE, changed(), "reload"), "reload")
+
+    def test_a_pending_restart_survives_an_unchanged_file(self):
+        self.assertEqual(accit.config_change(LIVE, changed(), "restart\n"), "restart")
+
+    def test_a_pending_restart_outranks_a_new_policy_change(self):
+        self.assertEqual(accit.config_change(LIVE, changed(protection={"mode": "all"}), "restart"), "restart")
+
+    def test_a_pending_reload_yields_to_a_new_restart(self):
+        self.assertEqual(accit.config_change(LIVE, changed(apps=[]), "reload"), "restart")
+
 
 def answer(code, body="", rc=0):
     """A registered curl result: body, then the status code on its own line."""
@@ -300,34 +381,63 @@ def answer(code, body="", rc=0):
 DENIED = answer(403, "Forbidden")
 
 
+def status(state, address="203.0.113.7"):
+    """A registered curl result of the Portal's GET /api/status (portal/api.rs `status_body`)."""
+    return answer(200, json.dumps({"state": state, "address": address, "csrf_token": "x"}))
+
+
 class PublicProbe(unittest.TestCase):
-    """Spec section 5: from a public Address without a Grant, a Gated host answers 403; skipped, never
-    passed, when the host's own public path does not reach accit with a public Address."""
+    """Spec sections 3 and 5: a public Address outside every Trusted network and without a Grant gets 403 on
+    a Gated host. Skipped, never passed, when the path does not carry such an Address."""
 
-    def test_open_passes_and_gated_is_denied(self):
-        self.assertEqual(accit.public_probe(answer(200, "<html>"), DENIED), {"outcome": "passed", "reason": ""})
-
-    def test_an_unreachable_public_address_is_skipped(self):
+    def test_no_grant_and_a_denied_gated_host_passes(self):
         self.assertEqual(
-            accit.public_probe(answer("000", rc=7), answer("000", rc=7)),
-            {"outcome": "skipped", "reason": "the Open host did not answer (curl exit 7)"},
+            accit.public_probe(status("none"), DENIED),
+            {"outcome": "passed", "reason": "203.0.113.7 without a Grant"},
         )
 
-    def test_an_open_host_denied_by_accit_is_skipped(self):
+    def test_an_expired_grant_is_no_grant(self):
+        self.assertEqual(accit.public_probe(status("expired"), DENIED)["outcome"], "passed")
+
+    def test_an_unreachable_portal_is_skipped(self):
         self.assertEqual(
-            accit.public_probe(DENIED, DENIED),
-            {"outcome": "skipped", "reason": "accit denied the Open host: the path does not carry a public Address"},
+            accit.public_probe(answer("000", rc=7), answer("000", rc=7)),
+            {"outcome": "skipped", "reason": "the Portal did not answer (curl exit 7)"},
+        )
+
+    def test_a_non_public_address_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(answer(403, "{}"), DENIED),
+            {"outcome": "skipped", "reason": "accit sees no public Address on this path"},
+        )
+
+    def test_a_trusted_address_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(status("trusted", "192.168.1.1"), answer(200, "<html>")),
+            {"outcome": "skipped", "reason": "192.168.1.1 is in a Trusted network"},
+        )
+
+    def test_an_address_holding_a_grant_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(status("active"), answer(200, "<html>")),
+            {"outcome": "skipped", "reason": "203.0.113.7 holds a Grant"},
+        )
+
+    def test_a_portal_that_is_not_ready_is_skipped(self):
+        self.assertEqual(
+            accit.public_probe(answer(503, "{}"), DENIED),
+            {"outcome": "skipped", "reason": "the Portal answered 503"},
         )
 
     def test_a_gated_host_answering_without_a_grant_fails(self):
         self.assertEqual(
-            accit.public_probe(answer(200), answer(200, "<html>")),
-            {"outcome": "failed", "reason": "the Gated host answered 200 without a Grant"},
+            accit.public_probe(status("none"), answer(200, "<html>")),
+            {"outcome": "failed", "reason": "the Gated host answered 200 to 203.0.113.7 without a Grant"},
         )
 
     def test_a_gated_host_that_does_not_answer_fails(self):
         self.assertEqual(
-            accit.public_probe(answer(302), answer("000", rc=28)),
+            accit.public_probe(status("none"), answer("000", rc=28)),
             {"outcome": "failed", "reason": "the Gated host did not answer (curl exit 28)"},
         )
 

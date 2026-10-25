@@ -79,24 +79,32 @@
 - name: Checks | Pick the probe hosts
   ansible.builtin.set_fact:
     accit_gated_host: "{{ (rows | selectattr('state', 'equalto', 'Gated') | map(attribute='host') | list + [''])[0] }}"
-    accit_open_host: "{{ (rows | selectattr('state', 'equalto', 'Open') | map(attribute='host') | reject('equalto', accit_portal_host) | list + [''])[0] }}"
     accit_public_address: "{{ ip_address_public | default('') }}"
+    accit_websecure: "{{ (accit_traefik_inspect.stdout | from_json)[0] | accit_traefik_websecure }}"
   vars:
     rows: "{{ accit_coverage | selectattr('entrypoint', 'equalto', 'websecure') | rejectattr('host', 'equalto', '*') | list }}"
 
-# Prints the body, then the status code on its own line.
+- name: Checks | Require a published websecure port
+  ansible.builtin.assert:
+    that: accit_websecure.error | length == 0
+    fail_msg: "{{ accit_websecure.error }}"
+    quiet: true
+
+# Prints the body, then the status code on its own line. HTTP/1.1: under h2 the curl exit code for a
+# TLS 1.3 certificate-required alert depends on the curl version.
 - name: Checks | Probe through Traefik
   ansible.builtin.command:
     argv:
       - "curl"
       - "-sS"
       - "-k"
+      - "--http1.1"
       - "--max-time"
       - "10"
       - "-w"
       - "\n%{http_code}"
-      - "--resolve"
-      - "{{ item.host }}:443:{{ item.address }}"
+      - "--connect-to"
+      - "{{ item.host }}:443:{{ item.address }}:{{ accit_websecure.port }}"
       - "https://{{ item.host }}/"
   loop: "{{ probes | selectattr('host') | selectattr('address') | list }}"
   loop_control:
@@ -106,9 +114,8 @@
   failed_when: false
   vars:
     probes:
-      - { key: gated, host: "{{ accit_gated_host }}", address: 127.0.0.1 }
-      - { key: portal, host: "{{ accit_portal_host }}", address: 127.0.0.1 }
-      - { key: public_open, host: "{{ accit_open_host }}", address: "{{ accit_public_address }}" }
+      - { key: gated, host: "{{ accit_gated_host }}", address: "{{ accit_websecure.address }}" }
+      - { key: portal, host: "{{ accit_portal_host }}", address: "{{ accit_websecure.address }}" }
       - { key: public_gated, host: "{{ accit_gated_host }}", address: "{{ accit_public_address }}" }
 
 - name: Checks | Index the probes
@@ -128,10 +135,29 @@
     msg: "No Gated router in Traefik: nothing to probe."
   when: accit_gated_host | length == 0
 
+# The Portal reports the Address accit sees on this path and whether a Trusted network or a Grant lets it
+# through. Needs the generated certificate.
+- name: Checks | Read the Portal's status through the public address
+  ansible.builtin.shell: |
+    set -euo pipefail
+    password=$(cat "{{ accit_pki_dir }}/client.p12.password")
+    printf 'cert = "%s:%s"\n' "{{ accit_pki_dir }}/client.p12" "$password" \
+      | curl -K - --cert-type P12 -sS -k --max-time 10 -w '\n%{http_code}' \
+          --connect-to "{{ accit_portal_host }}:443:{{ accit_public_address }}:{{ accit_websecure.port }}" \
+          "https://{{ accit_portal_host }}/api/status"
+  args:
+    executable: /bin/bash
+  register: accit_public_status
+  changed_when: false
+  failed_when: false
+  when:
+    - "'public_gated' in accit_probe"
+    - lookup('role_var', '_client_ca_file', role='accit') | length == 0
+
 - name: Checks | Judge the public-address probe
   ansible.builtin.set_fact:
-    accit_public: "{{ accit_probe.public_open | accit_public_probe(accit_probe.public_gated) }}"
-  when: "'public_gated' in accit_probe and 'public_open' in accit_probe"
+    accit_public: "{{ accit_public_status | accit_public_probe(accit_probe.public_gated) }}"
+  when: accit_public_status is not skipped
 
 - name: Checks | Require a Gated host to deny a public Address
   ansible.builtin.assert:
@@ -145,7 +171,7 @@
     msg: "Public-address probe {{ outcome }}{{ (': ' ~ reason) if reason }}"
   vars:
     outcome: "{{ accit_public.outcome | default('skipped') }}"
-    reason: "{{ accit_public.reason | default('no public address, Open host or Gated host to probe') }}"
+    reason: "{{ accit_public.reason | default('no public address, Gated host or generated client certificate') }}"
 
 # 35: handshake failure; 56: TLS 1.3 alert after the handshake. Anything else is doubt, not mTLS.
 - name: Checks | Require the Portal to refuse a missing client certificate
@@ -157,10 +183,12 @@
 - name: Checks | Open a TLS session to the Portal
   ansible.builtin.command:
     argv:
+      - "timeout"
+      - "10"
       - "openssl"
       - "s_client"
       - "-connect"
-      - "127.0.0.1:443"
+      - "{{ accit_websecure.address }}:{{ accit_websecure.port }}"
       - "-servername"
       - "{{ accit_portal_host }}"
     stdin: Q
@@ -175,7 +203,8 @@
     password=$(cat "{{ accit_pki_dir }}/client.p12.password")
     printf 'cert = "%s:%s"\n' "{{ accit_pki_dir }}/client.p12" "$password" \
       | curl -K - --cert-type P12 -sS -k --max-time 10 -o /dev/null -w '%{http_code}' \
-          --resolve "{{ accit_portal_host }}:443:127.0.0.1" "https://{{ accit_portal_host }}/"
+          --connect-to "{{ accit_portal_host }}:443:{{ accit_websecure.address }}:{{ accit_websecure.port }}" \
+          "https://{{ accit_portal_host }}/"
   args:
     executable: /bin/bash
   register: accit_portal_with

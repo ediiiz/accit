@@ -49,20 +49,21 @@ Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod.
 | `accit_role_traefik_alias_headers_strategy`  | `delete`          | `aliasHeadersStrategy` on `websecure`; affects every app there (spec section 10)                         |
 | `accit_role_client_ca_file`                  | `""`              | your own client CA certificate on the host; empty = the role generates CA and shared certificate         |
 
-`accit.yaml` is rendered from these on every run (`profile: production`) and checked with the pinned image's `accit admin check`. A change to `protection` alone is applied with `accit admin reload`; any other change restarts accit, since reload applies only `protection`. `docker_networks` lists every Docker subnet present at the time of the run.
+`accit.yaml` is rendered from these on every run (`profile: production`) and checked with the pinned image's `accit admin check`. A change to `protection` alone is applied with `accit admin reload`; any other change restarts accit, since reload applies only `protection`. A run that fails before applying the change leaves `config-pending`, and the next run applies it. `docker_networks` lists every Docker subnet present at the time of the run.
 
 Gated hosts must not be Cloudflare-proxied: accit would see Cloudflare's address instead of the client's (spec section 1).
 
 ## Files on the host
 
-| Path                      | Owner, mode          | Holds                                                                                 |
-| ------------------------- | -------------------- | ------------------------------------------------------------------------------------- |
-| `/opt/accit/config/`      | `root:<gid>` `0750`  | `accit.yaml`, `proxy-token` (`0640`), `client-ca.pem`; mounted read-only at `/config` |
-| `/opt/accit/data/`        | `<uid>:<gid>` `0700` | SQLite database, admin socket; the container runs as `<uid>:<gid>`                    |
-| `/opt/accit/pki/`         | `root` `0700`        | `ca.pem` (`0644`), `client.p12`, `client.p12.password`, `retired/`; no CA key         |
-| `/opt/accit/backups/`     | `root` `0700`        | database copies, one per image tag left                                               |
-| `/opt/accit/deployed-tag` | `root` `0644`        | the running image tag                                                                 |
-| `/opt/traefik/accit.yml`  | `root` `0600`        | chain, Portal router, mTLS option; holds the proxy token                              |
+| Path                        | Owner, mode          | Holds                                                                                 |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------- |
+| `/opt/accit/config/`        | `root:<gid>` `0750`  | `accit.yaml`, `proxy-token` (`0640`), `client-ca.pem`; mounted read-only at `/config` |
+| `/opt/accit/data/`          | `<uid>:<gid>` `0700` | SQLite database, admin socket; the container runs as `<uid>:<gid>`                    |
+| `/opt/accit/pki/`           | `root` `0700`        | `ca.pem` (`0644`), `client.p12`, `client.p12.password`, `retired/`; no CA key         |
+| `/opt/accit/backups/`       | `root` `0700`        | database copies, one per image tag left                                               |
+| `/opt/accit/deployed-tag`   | `root` `0644`        | the running image tag                                                                 |
+| `/opt/accit/config-pending` | `root` `0644`        | `reload` or `restart` not yet applied; present only after a failed run                |
+| `/opt/traefik/accit.yml`    | `root` `0600`        | chain, Portal router, mTLS option; holds the proxy token                              |
 
 The proxy token and the `.p12` password are generated on the host and never appear in the inventory or Ansible's output. Hand out `client.p12` and its password by different routes, with the onboarding guide.
 
@@ -92,8 +93,12 @@ Any failure fails the run:
 - Traefik v3.7.16 or later, accit at its pinned address, `accit admin check` exits 0, `/readyz`
 - the `accit@file` chain Traefik loaded sets, verifies, then deletes the token
 - a Gated host answers `403 Forbidden` to the host itself
-- through the host's public address (`ip_address_public`), an Open host passes and a Gated host answers `403 Forbidden`; reported as skipped when the Open host does not pass, so the path does not carry a public Address
+- through the host's public address (`ip_address_public`), with the generated certificate, the Portal's `/api/status` reports a public Address without a Grant, and a Gated host answers `403 Forbidden`; reported as skipped when the Portal does not answer, sees no public Address, or reports a Trusted network or a Grant, and always with your own client CA
 - the Portal presents a server certificate, fails the TLS handshake without the client certificate, and answers with the generated one
+
+The probes reach Traefik where it publishes `websecure`: loopback when bound to every address, else the bound address (Saltbox's Tailscale mode binds `ip_address_public`), at the published port.
+
+On a host that owns its public address, the public-address probe usually reports skipped: with Saltbox's `userland-proxy: false`, Docker rewrites the host's own connection to the bridge gateway, a Docker address. Check from outside instead (spec section 5).
 
 From the host itself accit sees a Docker address and refuses it at the Address check, so only the public-address probe reaches the Policy. No Saltbox app echoes request headers: the token's removal is checked on the loaded chain, end to end only in the Compose harness (`crates/e2e`).
 

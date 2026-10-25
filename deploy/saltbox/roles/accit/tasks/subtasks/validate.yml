@@ -8,16 +8,16 @@
 
 - name: Validate | Check the pinned addresses
   ansible.builtin.assert:
-    that:
-      - (traefik_address ~ '/32') | accit_overlapping([subnet]) | length == 1
-      - (accit_address ~ '/32') | accit_overlapping([subnet]) | length == 1
-      - traefik_address != accit_address
-    fail_msg: "accit_role_network_traefik_address and _accit_address must be two addresses in {{ subnet }}."
+    that: errors | length == 0
+    fail_msg: "{{ errors | join('; ') }}: set accit_role_network_traefik_address and _accit_address."
     quiet: true
   vars:
     subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
     traefik_address: "{{ lookup('role_var', '_network_traefik_address', role='accit') }}"
     accit_address: "{{ lookup('role_var', '_network_accit_address', role='accit') }}"
+    errors: >-
+      {{ ([traefik_address | accit_pinned_address_error(subnet), accit_address | accit_pinned_address_error(subnet)]
+          + (['Traefik and accit share ' ~ accit_address] if traefik_address == accit_address else [])) | select | list }}
 
 - name: Validate | List Docker networks
   ansible.builtin.command: docker network ls --quiet
