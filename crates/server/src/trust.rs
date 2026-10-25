@@ -125,10 +125,11 @@ fn forbidden() -> Response {
     ([(header::CACHE_CONTROL, "no-store")], (StatusCode::FORBIDDEN, "Forbidden")).into_response()
 }
 
-/// Verification listener: `/healthz` from loopback answers without the token (the image healthcheck).
+/// Verification listener: `/healthz` and `/readyz` from loopback answer without the token (`accit healthcheck`, `accit ready`).
 pub async fn verify_gate(State(trust): State<ProxyTrust>, request: Request, next: Next) -> Response {
     let peer = peer(&request);
-    let healthcheck = request.uri().path() == "/healthz" && peer.is_some_and(|peer| peer.is_loopback());
+    let healthcheck =
+        matches!(request.uri().path(), "/healthz" | "/readyz") && peer.is_some_and(|peer| peer.is_loopback());
 
     if healthcheck || trust.admits(peer, request.headers()) { next.run(request).await } else { forbidden() }
 }

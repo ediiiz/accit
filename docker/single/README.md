@@ -21,6 +21,7 @@ Run: mount the configuration read-only at `/config/accit.yaml` (or point `ACCIT_
 | ------------------------ | ----------------------------------------------------------------------------------------- |
 | `/accit serve` (default) | Both listeners.                                                                           |
 | `/accit healthcheck`     | Exit 0 when the local verification listener answers `/healthz` (the image `HEALTHCHECK`). |
+| `/accit ready`           | Exit 0 when the local verification listener answers `/readyz`.                            |
 
 ## CI build & push (GitHub Actions)
 

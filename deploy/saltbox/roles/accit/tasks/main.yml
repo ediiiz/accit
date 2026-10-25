@@ -15,7 +15,6 @@
     accit_pki_dir: "{{ lookup('role_var', '_paths_pki_lookup', role='accit') }}"
     accit_backups_dir: "{{ lookup('role_var', '_paths_backups_lookup', role='accit') }}"
     accit_dynamic_file: "{{ lookup('role_var', '_traefik_dynamic_file', role='accit') }}"
-    accit_ready_url: "http://{{ lookup('role_var', '_network_accit_address', role='accit') }}:8081/readyz"
 
 - name: Remove accit
   ansible.builtin.include_tasks: remove.yml
