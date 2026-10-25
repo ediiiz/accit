@@ -2,7 +2,7 @@
 
 For the person who runs accit next to Traefik and Docker. Spec: `../spec.md`. Terms: `../../GLOSSARY.md`. Threat model and limits: `threat-model.md`. Holder instructions: `onboarding.en.md`, `onboarding.de.md`.
 
-The steps are generic Traefik v3.7.16 or later on Docker. On Saltbox, use the role instead: `../../deploy/saltbox/README.md`. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. Nothing here was run on real devices or a production host; the harness is what `scripts/e2e` exercises. Its `traefik/traefik.yml` is a test file: do not copy its `api.insecure` or its `:8080` entrypoint (section 3).
+The steps are generic Traefik v3.7.16 or later on Docker. On Saltbox, use the role instead: `../../deploy/saltbox/README.md`. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. The Saltbox role runs on one production host, and the Portal was opened from Firefox on Android; these generic steps were exercised only through the harness (`scripts/e2e`). Its `traefik/traefik.yml` is a test file: do not copy its `api.insecure` or its `:8080` entrypoint (section 3).
 
 ## Secrets
 
@@ -23,7 +23,7 @@ On your own machine, not the server:
 scripts/client-ca create client-ca    # asks for a password of at least 12 characters
 ```
 
-**Not verified on devices.** The `.p12` uses a legacy encoding (PBE-SHA1-3DES, SHA-1 MAC) chosen for Apple and older Android importers, and the import steps in the onboarding guides were not run on hardware. Import it on one Android phone and one iPhone before handing it out; a failure affects every holder.
+**Verified on Android only.** The `.p12` uses a legacy encoding (PBE-SHA1-3DES, SHA-1 MAC) chosen for Apple and older Android importers. It imports on Android as a VPN & app user certificate, and Firefox offers it; Chrome on Android was seen loading the Portal indefinitely (cause unconfirmed). Import it on an iPhone before handing it out; a failure affects every holder.
 
 This writes `client-ca/ca.pem` (public) and `client-ca/client.p12`. The shared leaf is valid for 365 days and the CA for 366, so accit's warning (30 days before the CA expires) also precedes the leaf's expiry. The command prints the CA fingerprint and both expiry dates. Set `ACCIT_P12_PASSWORD` instead of the prompt for scripted use.
 
@@ -167,6 +167,8 @@ Logs are JSON on the container's output and contain no tokens, cookies or certif
 ## 6. Trusted networks (home access)
 
 For split DNS, where app hostnames resolve to the server's LAN address at home, devices on the home network pass every gated host without a Grant. Both modes.
+
+Without it, split DNS locks the home out: in `production`, a private Address outside a Trusted network is refused on every host, Open hosts included (spec section 3, step 3).
 
 1. List the home range in `trusted_networks`. Only `10/8`, `172.16/12`, `192.168/16`, `fc00::/7` and `100.64/10` ranges are accepted, and not ones overlapping `docker_networks`.
 2. If a router masquerades forwarded traffic, Traefik sees the router's address instead of the real source. Add it to `trusted_networks_exclude`.
