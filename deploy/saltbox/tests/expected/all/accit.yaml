@@ -1,0 +1,26 @@
+# Written from docs/spec.md sections 4, 5, 12 and issue #16 decisions 5-7 for tests/inventory/all.yml.
+profile: production
+public_origin: https://access.example.com
+trusted_proxy: 172.31.250.2
+proxy_token_file: /config/proxy-token
+client_ca_file: /config/client-ca.pem
+database: /data/accit.db
+docker_networks:
+  - 172.17.0.0/16
+  - 172.19.0.0/16
+  - 172.31.250.0/29
+  - fd00:dead:beef::/48
+title: Zugang
+default_language: de
+protection:
+  mode: all
+  excluded_hosts:
+    - status.example.com
+    - help.example.com
+  trusted_networks:
+    - 192.168.1.0/24
+  trusted_networks_exclude:
+    - 192.168.1.1
+apps:
+  - name: Jellyfin
+    url: https://jellyfin.example.com

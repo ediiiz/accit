@@ -1,0 +1,8 @@
+# Written from docs/spec.md section 10 and issue #16 decisions 5, 12, 15 for tests/inventory/all.yml.
+traefik_role_docker_commands_custom:
+  - --entrypoints.websecure.http.middlewares=accit@file
+  - --entrypoints.websecure.http.aliasHeadersStrategy=delete
+  - --core.strictTLSOptions=true
+traefik_role_docker_networks_custom:
+  - name: accit
+    ipv4_address: 172.31.250.2

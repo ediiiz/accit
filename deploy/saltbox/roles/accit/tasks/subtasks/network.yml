@@ -1,0 +1,12 @@
+---
+- name: Network | Create the accit network
+  community.docker.docker_network:
+    name: "{{ accit_name }}"
+    internal: true
+    ipam_config:
+      - subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+  when: not accit_network_exists
+
+- name: Network | Set docker_networks for accit.yaml
+  ansible.builtin.set_fact:
+    accit_docker_subnets: "{{ (accit_other_subnets + [lookup('role_var', '_network_subnet', role='accit')]) | unique }}"

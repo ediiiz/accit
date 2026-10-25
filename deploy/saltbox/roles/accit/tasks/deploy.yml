@@ -1,0 +1,58 @@
+---
+- name: Validate
+  ansible.builtin.include_tasks: subtasks/validate.yml
+
+- name: Add DNS record
+  ansible.builtin.include_tasks: "{{ resources_tasks_path }}/dns/tasker.yml"
+  vars:
+    dns_record: "{{ lookup('role_var', '_dns_record') }}"
+    dns_zone: "{{ lookup('role_var', '_dns_zone') }}"
+    dns_proxy: "{{ lookup('role_var', '_dns_proxy') }}"
+
+- name: Create the accit network
+  ansible.builtin.include_tasks: subtasks/network.yml
+
+- name: Create directories
+  ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+
+- name: Create secrets
+  ansible.builtin.include_tasks: subtasks/secrets.yml
+
+- name: Render accit.yaml
+  ansible.builtin.include_tasks: subtasks/config.yml
+
+- name: Handle an image tag change
+  ansible.builtin.include_tasks: subtasks/upgrade.yml
+
+- name: Create Docker container
+  ansible.builtin.include_tasks: "{{ resources_tasks_path }}/docker/create_docker_container.yml"
+
+- name: Record the deployed tag
+  ansible.builtin.copy:
+    content: "{{ lookup('role_var', '_docker_image_tag', role='accit') }}\n"
+    dest: "{{ accit_location }}/deployed-tag"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Write the Traefik dynamic file
+  ansible.builtin.template:
+    src: traefik-accit.yml.j2
+    dest: "{{ accit_dynamic_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Wait until accit is ready
+  ansible.builtin.include_tasks: subtasks/ready.yml
+
+- name: Check Traefik's wiring
+  ansible.builtin.include_tasks: subtasks/wiring.yml
+
+- name: Run post-deploy checks
+  ansible.builtin.include_tasks: subtasks/checks.yml
+
+- name: Report coverage
+  ansible.builtin.include_tasks: subtasks/coverage.yml

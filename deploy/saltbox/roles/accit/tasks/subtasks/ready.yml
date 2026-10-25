@@ -1,0 +1,50 @@
+---
+- name: Ready | Discard the restored Grants
+  ansible.builtin.command: docker exec {{ accit_container }} /accit admin recover --discard-grants
+  register: accit_recover
+  until: accit_recover.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: true
+  when: accit_upgrade.action == 'rollback'
+
+- name: Ready | Wait for /readyz
+  ansible.builtin.uri:
+    url: "{{ accit_ready_url }}"
+  register: accit_ready
+  until: accit_ready.status == 200
+  retries: 30
+  delay: 2
+
+# A fresh container already read the new files.
+- name: Ready | Reload the Policy
+  ansible.builtin.command: docker exec {{ accit_container }} /accit admin reload
+  register: accit_reload
+  changed_when: accit_reload.rc == 0
+  failed_when: accit_reload.rc != 0 and 'restart required' not in accit_reload.stderr
+  when:
+    - accit_config_change == 'reload'
+    - accit_token_generated is skipped
+    - create_docker_result is not changed
+
+- name: Ready | Restart accit
+  ansible.builtin.command: docker restart {{ accit_container }}
+  register: accit_restart
+  changed_when: true
+  when:
+    - create_docker_result is not changed
+    - (accit_token_generated is changed) or (accit_config_change == 'restart') or (accit_reload.rc | default(0) != 0)
+
+- name: Ready | Wait for /readyz after the restart
+  ansible.builtin.uri:
+    url: "{{ accit_ready_url }}"
+  register: accit_ready
+  until: accit_ready.status == 200
+  retries: 30
+  delay: 2
+  when: accit_restart is not skipped
+
+- name: Ready | Clear the pending change
+  ansible.builtin.file:
+    path: "{{ accit_location }}/config-pending"
+    state: absent

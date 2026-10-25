@@ -1,0 +1,118 @@
+---
+# Read-only: everything that can refuse the run does so before anything changes.
+- name: Validate | Check the Policy mode
+  ansible.builtin.assert:
+    that: lookup('role_var', '_protection_mode', role='accit') in ['selected', 'all']
+    fail_msg: "Set accit_role_protection_mode to selected or all in the inventory (docs/spec.md section 4)."
+    quiet: true
+
+- name: Validate | Check the pinned addresses
+  ansible.builtin.assert:
+    that: errors | length == 0
+    fail_msg: "{{ errors | join('; ') }}: set accit_role_network_traefik_address and _accit_address."
+    quiet: true
+  vars:
+    subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+    traefik_address: "{{ lookup('role_var', '_network_traefik_address', role='accit') }}"
+    accit_address: "{{ lookup('role_var', '_network_accit_address', role='accit') }}"
+    errors: >-
+      {{ ([traefik_address | accit_pinned_address_error(subnet), accit_address | accit_pinned_address_error(subnet)]
+          + (['Traefik and accit share ' ~ accit_address] if traefik_address == accit_address else [])) | select | list }}
+
+- name: Validate | List Docker networks
+  ansible.builtin.command: docker network ls --quiet
+  register: accit_network_ids
+  changed_when: false
+
+- name: Validate | Inspect Docker networks
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'network', 'inspect'] + accit_network_ids.stdout_lines }}"
+  register: accit_networks_inspect
+  changed_when: false
+
+- name: Validate | Read subnets
+  ansible.builtin.set_fact:
+    accit_network_exists: "{{ networks | selectattr('Name', 'equalto', accit_name) | list | length > 0 }}"
+    accit_network_subnets:
+      "{{ networks | selectattr('Name', 'equalto', accit_name) | map(attribute='IPAM.Config') | select | flatten
+      | map(attribute='Subnet', default='') | select | list }}"
+    accit_other_subnets:
+      "{{ networks | rejectattr('Name', 'equalto', accit_name) | map(attribute='IPAM.Config') | select | flatten
+      | map(attribute='Subnet', default='') | select | unique | list }}"
+  vars:
+    networks: "{{ accit_networks_inspect.stdout | from_json }}"
+
+- name: Validate | Keep the pinned subnet
+  ansible.builtin.assert:
+    that: accit_network_subnets == [subnet]
+    fail_msg: "Docker network {{ accit_name }} has {{ accit_network_subnets }}, not {{ subnet }}. Remove it (sb install mod-accit-remove) or set accit_role_network_subnet."
+    quiet: true
+  vars:
+    subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+  when: accit_network_exists
+
+- name: Validate | Refuse an overlapping subnet
+  ansible.builtin.assert:
+    that: overlaps | length == 0
+    fail_msg: "{{ subnet }} overlaps Docker networks {{ overlaps }}: set accit_role_network_subnet and both addresses."
+    quiet: true
+  vars:
+    subnet: "{{ lookup('role_var', '_network_subnet', role='accit') }}"
+    overlaps: "{{ subnet | accit_overlapping(accit_other_subnets) }}"
+  when: not accit_network_exists
+
+- name: Validate | Look for Traefik's dynamic directory
+  ansible.builtin.stat:
+    path: "{{ accit_dynamic_file | dirname }}"
+  register: accit_traefik_dir
+
+- name: Validate | Require Traefik
+  ansible.builtin.assert:
+    that: accit_traefik_dir.stat.isdir | default(false)
+    fail_msg: "{{ accit_dynamic_file | dirname }} is missing: install Traefik first (sb install traefik)."
+    quiet: true
+
+- name: Validate | Look for the operator's client CA certificate
+  ansible.builtin.stat:
+    path: "{{ lookup('role_var', '_client_ca_file', role='accit') }}"
+  register: accit_operator_ca
+  when: lookup('role_var', '_client_ca_file', role='accit') | length > 0
+
+- name: Validate | Check the client CA settings
+  ansible.builtin.assert:
+    that:
+      - accit_operator_ca.stat.exists
+      - not (accit_rotate_client_ca | default(false) | bool)
+    fail_msg: "accit_role_client_ca_file must exist; with your own CA, rotate it yourself and update that file."
+    quiet: true
+  when: lookup('role_var', '_client_ca_file', role='accit') | length > 0
+
+- name: Validate | Read the deployed tag
+  ansible.builtin.slurp:
+    src: "{{ accit_location }}/deployed-tag"
+  register: accit_deployed_tag
+  failed_when: false
+
+- name: Validate | Look for the database
+  ansible.builtin.stat:
+    path: "{{ accit_data_dir }}/accit.db"
+  register: accit_database
+
+- name: Validate | Find database copies
+  ansible.builtin.find:
+    paths: "{{ accit_backups_dir }}"
+    patterns: "accit-*.db"
+  register: accit_copies
+
+- name: Validate | Plan the database across the tag change
+  ansible.builtin.set_fact:
+    accit_upgrade: "{{ deployed | accit_upgrade_plan(lookup('role_var', '_docker_image_tag', role='accit'), copies, accit_database.stat.exists) }}"
+  vars:
+    deployed: "{{ (accit_deployed_tag.content | b64decode | trim) if (accit_deployed_tag.content is defined) else '' }}"
+    copies: "{{ accit_copies.files | map(attribute='path') | map('basename') | map('regex_replace', '^accit-(.*)\\.db$', '\\1') | list }}"
+
+- name: Validate | Check the image tag
+  ansible.builtin.assert:
+    that: accit_upgrade.error | length == 0
+    fail_msg: "{{ accit_upgrade.error }}"
+    quiet: true

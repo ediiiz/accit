@@ -1,0 +1,149 @@
+#########################################################################
+# Title:            accit: Saltbox role                                 #
+# URL:              https://github.com/ediiiz/accit                     #
+# --                                                                    #
+# Docs:             deploy/saltbox/README.md                            #
+#########################################################################
+---
+################################
+# Basics
+################################
+
+accit_name: accit
+
+################################
+# Settings
+################################
+
+# Policy (docs/spec.md section 4). Required: selected or all; no default on purpose.
+accit_role_protection_mode: ""
+# Selected mode: the Gated hosts.
+accit_role_protection_hosts: []
+# All mode: the Open hosts.
+accit_role_protection_excluded_hosts: []
+# Trusted networks (docs/spec.md section 5).
+accit_role_trusted_networks: []
+accit_role_trusted_networks_exclude: []
+# App links shown on the Portal: [{name, url}], https:// only. Display only.
+accit_role_apps: []
+# A host for the out-of-band guide; kept Open in all mode.
+accit_role_help_host: ""
+# Further accit.yaml keys (title, default_language, grant_duration, ...). The keys the role manages win.
+accit_role_config_custom: {}
+
+################################
+# Paths
+################################
+
+accit_role_paths_folder: "{{ accit_name }}"
+accit_role_paths_location: "{{ server_appdata_path }}/{{ accit_role_paths_folder }}"
+accit_role_paths_folders_list:
+  - "{{ accit_role_paths_location }}"
+# Skip docs
+accit_role_paths_config_lookup: "{{ lookup('role_var', '_paths_location', role='accit') }}/config"
+accit_role_paths_data_lookup: "{{ lookup('role_var', '_paths_location', role='accit') }}/data"
+accit_role_paths_pki_lookup: "{{ lookup('role_var', '_paths_location', role='accit') }}/pki"
+accit_role_paths_backups_lookup: "{{ lookup('role_var', '_paths_location', role='accit') }}/backups"
+# Operator-supplied client CA certificate on the host; empty = the role generates CA and shared bundle.
+accit_role_client_ca_file: ""
+
+################################
+# Web
+################################
+
+accit_role_web_subdomain: "access"
+accit_role_web_domain: "{{ user.domain }}"
+# Do not edit or override using the inventory
+accit_role_web_host_lookup: "{{ (lookup('role_var', '_web_subdomain', role='accit') ~ '.' ~ lookup('role_var', '_web_domain', role='accit')) | lower }}"
+
+################################
+# DNS
+################################
+
+accit_role_dns_record: "{{ lookup('role_var', '_web_subdomain', role='accit') }}"
+accit_role_dns_zone: "{{ lookup('role_var', '_web_domain', role='accit') }}"
+# Never proxied: mTLS and the Address need the client's own connection.
+accit_role_dns_proxy: false
+
+################################
+# Traefik
+################################
+
+accit_role_traefik_certresolver: "{{ traefik_default_certresolver }}"
+# Applies to every app on websecure (docs/spec.md section 10).
+accit_role_traefik_alias_headers_strategy: "delete"
+accit_role_traefik_dynamic_file: "{{ server_appdata_path }}/traefik/accit.yml"
+
+################################
+# Network
+################################
+
+accit_role_network_subnet: "172.31.250.0/29"
+accit_role_network_traefik_address: "172.31.250.2"
+accit_role_network_accit_address: "172.31.250.3"
+
+################################
+# Docker
+################################
+
+# Container
+accit_role_docker_container: "{{ accit_name }}"
+
+# Image: an exact release tag such as v1.2.3; required.
+accit_role_docker_image_repo: "ghcr.io/ediiiz/accit"
+accit_role_docker_image_tag: ""
+accit_role_docker_image: "{{ lookup('role_var', '_docker_image_repo', role='accit') }}:{{ lookup('role_var', '_docker_image_tag', role='accit') }}"
+
+# Volumes
+accit_role_docker_volumes_default:
+  - "{{ lookup('role_var', '_paths_config_lookup', role='accit') }}:/config:ro"
+  - "{{ lookup('role_var', '_paths_data_lookup', role='accit') }}:/data"
+accit_role_docker_volumes_custom: []
+accit_role_docker_volumes: "{{ lookup('role_var', '_docker_volumes_default', role='accit')
+  + lookup('role_var', '_docker_volumes_custom', role='accit') }}"
+accit_role_docker_volumes_global: false
+
+# Hosts
+accit_role_docker_hosts_use_common: false
+
+# Networks: the accit network only (ADR 0002).
+accit_role_docker_network_mode: "{{ accit_name }}"
+accit_role_docker_networks:
+  - name: "{{ accit_name }}"
+    ipv4_address: "{{ lookup('role_var', '_network_accit_address', role='accit') }}"
+
+# Hardening (docs/spec.md section 13)
+accit_role_docker_user: "{{ uid }}:{{ gid }}"
+accit_role_docker_read_only: true
+accit_role_docker_cap_drop:
+  - ALL
+accit_role_docker_security_opts:
+  - "no-new-privileges:true"
+accit_role_docker_tmpfs:
+  - "/tmp:size=16m,mode=1777"
+
+################################
+# Config
+################################
+
+# Do not edit or override using the inventory
+accit_role_protection_lookup: >-
+  {{ {'mode': lookup('role_var', '_protection_mode', role='accit'), 'hosts': lookup('role_var', '_protection_hosts', role='accit')}
+     if lookup('role_var', '_protection_mode', role='accit') == 'selected'
+     else {'mode': lookup('role_var', '_protection_mode', role='accit'),
+           'excluded_hosts': (lookup('role_var', '_protection_excluded_hosts', role='accit')
+                              + ([lookup('role_var', '_help_host', role='accit') | lower]
+                                 if lookup('role_var', '_help_host', role='accit') | length > 0 else []))} }}
+accit_role_config_lookup: >-
+  {{ lookup('role_var', '_config_custom', role='accit')
+     | combine({'profile': 'production',
+                'public_origin': 'https://' ~ lookup('role_var', '_web_host_lookup', role='accit'),
+                'trusted_proxy': lookup('role_var', '_network_traefik_address', role='accit'),
+                'proxy_token_file': '/config/proxy-token',
+                'client_ca_file': '/config/client-ca.pem',
+                'database': '/data/accit.db',
+                'docker_networks': accit_docker_subnets | sort,
+                'protection': lookup('role_var', '_protection_lookup', role='accit')
+                              | combine({'trusted_networks': lookup('role_var', '_trusted_networks', role='accit'),
+                                         'trusted_networks_exclude': lookup('role_var', '_trusted_networks_exclude', role='accit')}),
+                'apps': lookup('role_var', '_apps', role='accit')}) }}

@@ -1,0 +1,9 @@
+# What Saltbox defines for every play (accounts.yml, group_vars/all.yml), as far as the role reads it.
+user:
+  name: seed
+  domain: example.com
+uid: "1000"
+gid: "1000"
+server_appdata_path: /opt
+traefik_default_certresolver: cfdns
+dns_proxied: true

@@ -1,0 +1,5 @@
+# The role's entry in /opt/saltbox_mod/saltbox_mod.yml (README.md), for the syntax check and ansible-lint.
+- name: Saltbox mod
+  hosts: localhost
+  roles:
+    - { role: accit, tags: ["accit", "accit-remove"] }

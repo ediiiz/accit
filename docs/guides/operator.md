@@ -2,7 +2,7 @@
 
 For the person who runs accit next to Traefik and Docker. Spec: `../spec.md`. Terms: `../../GLOSSARY.md`. Threat model and limits: `threat-model.md`. Holder instructions: `onboarding.en.md`, `onboarding.de.md`.
 
-The steps are generic Traefik v3.7.16 or later on Docker. A Saltbox role is a later milestone. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. Nothing here was run on real devices or a production host; the harness is what `scripts/e2e` exercises. Its `traefik/traefik.yml` is a test file: do not copy its `api.insecure` or its `:8080` entrypoint (section 3).
+The steps are generic Traefik v3.7.16 or later on Docker. On Saltbox, use the role instead: `../../deploy/saltbox/README.md`. The tested reference configuration is the Compose harness in `../../harness/`: `compose.yml`, `traefik/traefik.yml`, `traefik/accit.yml.in`, `accit.yaml`. Nothing here was run on real devices or a production host; the harness is what `scripts/e2e` exercises. Its `traefik/traefik.yml` is a test file: do not copy its `api.insecure` or its `:8080` entrypoint (section 3).
 
 ## Secrets
 

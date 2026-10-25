@@ -1,0 +1,16 @@
+# Sample localhost.yml: selected mode, overridden network and Portal subdomain on another domain.
+user:
+  name: seed
+  domain: example.org
+accit_role_docker_image_tag: 1.4.0
+accit_role_protection_mode: selected
+accit_role_protection_hosts:
+  - jellyfin.example.org
+accit_role_help_host: help.example.org
+accit_role_web_subdomain: portal
+accit_role_network_subnet: 10.250.0.0/28
+accit_role_network_traefik_address: 10.250.0.10
+accit_role_network_accit_address: 10.250.0.11
+accit_docker_subnets:
+  - 172.19.0.0/16
+  - 10.250.0.0/28

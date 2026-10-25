@@ -1,0 +1,51 @@
+# accit chain, Portal router and mTLS option (docs/spec.md section 10). Rendered by the accit Saltbox role;
+# holds the proxy token: root-only, never in git.
+http:
+  middlewares:
+    accit-set-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: {{ accit_proxy_token | to_json }}
+    accit-verify:
+      forwardAuth:
+        address: "http://{{ lookup('role_var', '_network_accit_address', role='accit') }}:8081/verify"
+        trustForwardHeader: false
+        authRequestHeaders:
+          - X-Accit-Proxy-Token
+        # accit's bodies are empty or the 9-byte "Forbidden"; over the limit, a 403 would become a 401.
+        maxResponseBodySize: 4096
+    accit-delete-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: ""
+    accit:
+      chain:
+        middlewares:
+          - accit-set-token
+          - accit-verify
+          - accit-delete-token
+  routers:
+    accit-portal:
+      rule: "Host(`{{ lookup('role_var', '_web_host_lookup', role='accit') }}`)"
+      entryPoints:
+        - websecure
+      # The entrypoint chain deleted the token; the Portal listener needs it again.
+      middlewares:
+        - accit-set-token
+      service: accit-portal
+      tls:
+        certResolver: {{ lookup('role_var', '_traefik_certresolver', role='accit') | to_json }}
+        options: accit-mtls
+  services:
+    accit-portal:
+      loadBalancer:
+        servers:
+          - url: "http://{{ lookup('role_var', '_network_accit_address', role='accit') }}:8080"
+tls:
+  options:
+    accit-mtls:
+      minVersion: VersionTLS12
+      clientAuth:
+        clientAuthType: RequireAndVerifyClientCert
+        caFiles:
+          - {{ accit_client_ca_pem | to_json }}

@@ -1,0 +1,49 @@
+# Written from docs/spec.md section 10 and issue #16 decisions 3, 7, 13 for tests/inventory/all.yml.
+# CA_PEM stands for the content of tests/ca.pem; render.yml substitutes it before comparing.
+http:
+  middlewares:
+    accit-set-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: render-test-token
+    accit-verify:
+      forwardAuth:
+        address: http://172.31.250.3:8081/verify
+        trustForwardHeader: false
+        authRequestHeaders:
+          - X-Accit-Proxy-Token
+        maxResponseBodySize: 4096
+    accit-delete-token:
+      headers:
+        customRequestHeaders:
+          X-Accit-Proxy-Token: ""
+    accit:
+      chain:
+        middlewares:
+          - accit-set-token
+          - accit-verify
+          - accit-delete-token
+  routers:
+    accit-portal:
+      rule: Host(`access.example.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - accit-set-token
+      service: accit-portal
+      tls:
+        certResolver: cfdns
+        options: accit-mtls
+  services:
+    accit-portal:
+      loadBalancer:
+        servers:
+          - url: http://172.31.250.3:8080
+tls:
+  options:
+    accit-mtls:
+      minVersion: VersionTLS12
+      clientAuth:
+        clientAuthType: RequireAndVerifyClientCert
+        caFiles:
+          - CA_PEM

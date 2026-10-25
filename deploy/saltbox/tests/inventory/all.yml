@@ -1,0 +1,23 @@
+# Sample localhost.yml: all mode with a help host, Trusted networks, app links and extra config keys.
+accit_role_docker_image_tag: v1.4.0
+accit_role_protection_mode: all
+accit_role_protection_excluded_hosts:
+  - status.example.com
+accit_role_help_host: Help.Example.com
+accit_role_trusted_networks:
+  - 192.168.1.0/24
+accit_role_trusted_networks_exclude:
+  - 192.168.1.1
+accit_role_apps:
+  - name: Jellyfin
+    url: https://jellyfin.example.com
+accit_role_config_custom:
+  title: Zugang
+  default_language: de
+  profile: test
+# Stand-ins for what the role reads from the host.
+accit_docker_subnets:
+  - fd00:dead:beef::/48
+  - 172.19.0.0/16
+  - 172.31.250.0/29
+  - 172.17.0.0/16

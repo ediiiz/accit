@@ -1,0 +1,36 @@
+# Renders the role's templates against a sample inventory and compares them with tests/expected/.
+# Run by deploy/saltbox/check: ansible-playbook render.yml -e scenario=all|selected
+- name: Render the accit role's templates
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/accit/defaults/main.yml
+    - inventory/saltbox.yml
+    - "inventory/{{ scenario }}.yml"
+  vars:
+    templates: ../roles/accit/templates
+    accit_proxy_token: render-test-token
+    accit_client_ca_pem: "{{ lookup('file', 'ca.pem') }}\n"
+  tasks:
+    - name: Compare accit.yaml
+      ansible.builtin.assert:
+        that: lookup('template', templates + '/accit.yaml.j2') | from_yaml == lookup('file', 'expected/' + scenario + '/accit.yaml') | from_yaml
+        fail_msg: "{{ lookup('template', templates + '/accit.yaml.j2') }}"
+        quiet: true
+
+    - name: Compare the Traefik dynamic file
+      ansible.builtin.assert:
+        that: lookup('template', templates + '/traefik-accit.yml.j2') | from_yaml == expected
+        fail_msg: "{{ lookup('template', templates + '/traefik-accit.yml.j2') }}"
+        quiet: true
+      vars:
+        expected: "{{ lookup('file', 'expected/all/traefik-accit.yml') | replace('- CA_PEM', '- ' + (accit_client_ca_pem | to_json)) | from_yaml }}"
+      when: scenario == 'all'
+
+    - name: Compare the Traefik inventory snippet
+      ansible.builtin.assert:
+        that: lookup('template', templates + '/traefik-inventory.yml.j2') | from_yaml == lookup('file', 'expected/all/traefik-inventory.yml') | from_yaml
+        fail_msg: "{{ lookup('template', templates + '/traefik-inventory.yml.j2') }}"
+        quiet: true
+      when: scenario == 'all'

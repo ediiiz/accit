@@ -1,0 +1,25 @@
+---
+# The role never edits the inventory: it says what Traefik needs and stops.
+- name: Wiring | Inspect Traefik
+  ansible.builtin.command: docker inspect {{ accit_traefik }}
+  register: accit_traefik_inspect
+  changed_when: false
+
+- name: Wiring | Compare with what accit needs
+  ansible.builtin.set_fact:
+    accit_traefik_missing: "{{ (accit_traefik_inspect.stdout | from_json)[0]
+      | accit_traefik_missing(accit_name,
+      lookup('role_var', '_network_traefik_address', role='accit'),
+      lookup('role_var', '_traefik_alias_headers_strategy', role='accit')) }}"
+
+- name: Wiring | Stop until Traefik is wired
+  ansible.builtin.fail:
+    msg: |
+      accit is running, but Traefik lacks:
+      {{ accit_traefik_missing | map('regex_replace', '^', '  - ') | join('\n') }}
+      Add to the inventory (sb edit inventory), next to any entries already in these lists:
+
+      {{ lookup('template', 'traefik-inventory.yml.j2') }}
+      Every app on websecure then passes accit, and aliasHeadersStrategy applies to all of them.
+      Run `sb install traefik`, then re-run `sb install mod-accit`.
+  when: accit_traefik_missing | length > 0

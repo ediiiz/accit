@@ -1,0 +1,11 @@
+---
+- name: Coverage | Report
+  ansible.builtin.debug:
+    msg: "{{ ['host  entrypoint  state  router'] + accit_coverage | map('dict2items') | map('map', attribute='value') | map('join', '  ') | list }}"
+
+- name: Coverage | Note Saltbox's internal Traefik API
+  ansible.builtin.debug:
+    msg: >-
+      Saltbox's traefik-internal router serves Traefik's API without authentication on the saltbox network:
+      any container there can read the proxy token from it. accit still trusts only Traefik's pinned address
+      on the {{ accit_name }} network (ADR 0002).
