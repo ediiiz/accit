@@ -14,7 +14,7 @@ Not in v1: per-user permissions, user-entered addresses or ranges, automatic cer
 
 1. Core and Portal (source phases 2 and 3).
 2. A Docker Compose harness: Traefik v3.7.16 with a test client CA, accit, two `whoami` apps (one gated, one open), and a client container with fixed source addresses. Most acceptance tests in section 10 run here, in CI.
-3. Next milestone: the Saltbox role in `deploy/saltbox/roles/accit`, designed in its own session before it is built.
+3. The Saltbox role in `deploy/saltbox/roles/accit`.
 
 Real-device and real-user gates (source phases 1 and 5) stay manual.
 

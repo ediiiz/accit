@@ -2,7 +2,7 @@
 
 Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod. Spec: `../../docs/spec.md` sections 10 to 13. Trust model: `../../docs/adr/0002-trust-traefik-by-pinned-address-and-token.md`. Generic Traefik setup and day-to-day commands: `../../docs/guides/operator.md`.
 
-**Never run against a real Saltbox host**; only `check` (below) has run. The first run stops at the Traefik wiring step.
+Deployed on one Saltbox host (Ubuntu 24.04, Traefik v3.7.16, Authelia). The first run stops at the Traefik wiring step.
 
 ## Install
 
@@ -28,6 +28,10 @@ Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod.
      - jellyfin.example.com
    ```
 
+   With split DNS at home, also set Trusted networks before the Traefik step ([Home network](#home-network)).
+
+   The image is private while the repository is: `sudo docker login ghcr.io` with a token that has `read:packages`, or use a local build: `docker save ghcr.io/ediiiz/accit:v0.0.1 | ssh <host> docker load`, then set `accit_role_docker_image_pull: false`. The tag must still look like `vX.Y.Z`. Watchtower pulls the same tag nightly and fails on a local-only image; build it with `--label com.centurylinklabs.watchtower.enable=false` to skip it.
+
 4. `sb install mod-accit`. The first run deploys accit, then stops and prints the Traefik lines to add to the inventory. Add them, run `sb install traefik`, then `sb install mod-accit` again.
 
 ## Inventory
@@ -35,6 +39,7 @@ Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod.
 | Variable                                     | Default           | Meaning                                                                                                  |
 | -------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
 | `accit_role_docker_image_tag`                | required          | exact release tag (`v1.2.3`); `latest` and other floating tags are refused                               |
+| `accit_role_docker_image_pull`               | `true`            | `false` uses an image already loaded on the host                                                         |
 | `accit_role_protection_mode`                 | required          | `selected` or `all`                                                                                      |
 | `accit_role_protection_hosts`                | `[]`              | Gated hosts, selected mode                                                                               |
 | `accit_role_protection_excluded_hosts`       | `[]`              | Open hosts, all mode                                                                                     |
@@ -52,6 +57,21 @@ Deploys accit on a [Saltbox](https://docs.saltbox.dev) host through saltbox_mod.
 `accit.yaml` is rendered from these on every run (`profile: production`) and checked with the pinned image's `accit admin check`. A change to `protection` alone is applied with `accit admin reload`; any other change restarts accit, since reload applies only `protection`. A run that fails before applying the change leaves `config-pending`, and the next run applies it. `docker_networks` lists every Docker subnet present at the time of the run.
 
 Gated hosts must not be Cloudflare-proxied: accit would see Cloudflare's address instead of the client's (spec section 1).
+
+`grant_duration` (default `7d`, at most `30d`) goes in `accit_role_config_custom`; changing it restarts accit. Existing Grants keep their expiry until the holder taps **Extend access**.
+
+## Home network
+
+With split DNS, where app hostnames resolve to the server's LAN address at home, Traefik sees a private address. accit refuses a private address outside a Trusted network on **every** host, Open hosts included, so home devices get `403` everywhere as soon as Traefik is wired. List the home range, and exclude the router:
+
+```yaml
+accit_role_trusted_networks:
+  - 192.168.1.0/24
+accit_role_trusted_networks_exclude:
+  - 192.168.1.1
+```
+
+Hostnames that resolve publicly at home arrive from the home's public address, or from the router through NAT loopback; neither passes without a Grant. The first field of `/opt/traefik/access.log` shows which address a home device arrives from. Operator guide section 6 has the outside-in check.
 
 ## Files on the host
 

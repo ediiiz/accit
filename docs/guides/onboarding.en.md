@@ -9,7 +9,7 @@ Keep both private. Anyone with both can enable access to the apps, so do not for
 
 ## 1. Install the certificate
 
-### Android (Chrome)
+### Android (Firefox or Chrome)
 
 1. Save `client.p12` on the phone.
 2. Open Settings and search for "certificate". Choose **Install a certificate**, then **VPN & app user certificate**. The menu names differ by vendor and Android version; a screen lock must be set.
@@ -47,5 +47,6 @@ A TV cannot install the certificate and does not need to. It uses the Wi-Fi's co
 | An app shows **Forbidden** (403)                                           | Access is not enabled for this connection, or it expired | Open the Portal and tap **Enable access**                                                   |
 | **Forbidden** right after enabling                                         | The apps may see another address than the Portal         | Open **Troubleshooting** in the Portal and send the Address and Family to the administrator |
 | The Portal does not open, or the browser shows an SSL or certificate error | The certificate is missing, wrong or expired             | Install it again; ask the administrator for a new file                                      |
+| The Portal keeps loading in Chrome on Android                              | Chrome may not be offering the certificate               | Force-stop Chrome in the Android settings and try again, or use Firefox                     |
 | "We couldn't enable access."                                               | The service is unavailable                               | Tap **Try again**; if it persists, tell the administrator                                   |
 | "Please wait a moment before trying again."                                | Too many attempts                                        | Wait for the countdown                                                                      |
