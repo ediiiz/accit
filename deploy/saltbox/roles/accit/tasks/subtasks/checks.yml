@@ -150,6 +150,7 @@
   register: accit_public_status
   changed_when: false
   failed_when: false
+  no_log: true
   when:
     - "'public_gated' in accit_probe"
     - lookup('role_var', '_client_ca_file', role='accit') | length == 0
